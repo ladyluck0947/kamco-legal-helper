@@ -1,6 +1,7 @@
 // 대화 영역 (DESIGN.md 2장): 질문 말풍선과 답변 카드가 쌓이는 곳
 import { useEffect, useRef } from "react";
 import type { ChatError, Message } from "./Chat";
+import AnswerCard from "./AnswerCard";
 
 export default function ConversationArea({
   messages,
@@ -48,11 +49,15 @@ export default function ConversationArea({
             </p>
           </div>
         ) : (
-          // 챗봇 답변: 왼쪽 카드 (답변 카드 모양은 PLAN 14번 작업에서 완성)
+          // 챗봇 답변: 왼쪽 답변 카드
           <div key={message.id} className="flex justify-start">
-            <p className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-bl-sm border border-zinc-200 bg-white px-4 py-2 text-base text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50">
-              {message.text}
-            </p>
+            {message.answer ? (
+              <AnswerCard answer={message.answer} notice={message.notice} />
+            ) : (
+              <p className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-bl-sm border border-zinc-200 bg-white px-4 py-2 text-base text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50">
+                {message.text}
+              </p>
+            )}
           </div>
         ),
       )}

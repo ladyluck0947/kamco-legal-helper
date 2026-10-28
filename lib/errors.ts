@@ -6,6 +6,7 @@ export type ErrorCode =
   | "TIMEOUT"
   | "AI_ERROR"
   | "BAD_REQUEST"
+  | "FORMAT_ERROR"
   | "NETWORK";
 
 export const ERROR_MESSAGES: Record<ErrorCode, string> = {
@@ -14,6 +15,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   TIMEOUT: "답변이 늦어지고 있어요. 잠시 후 다시 시도해 주세요.",
   AI_ERROR: "지금은 답변을 만들 수 없어요. 잠시 후 다시 시도해 주세요.",
   BAD_REQUEST: "질문을 처리할 수 없어요. 새로고침 후 다시 질문해 주세요.",
+  FORMAT_ERROR: "답변을 정리하지 못했어요. 질문을 조금 바꿔서 다시 시도해 주세요.",
   NETWORK: "인터넷 연결을 확인한 뒤 다시 시도해 주세요.",
 };
 
@@ -21,6 +23,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
 export const RETRYABLE: ReadonlySet<ErrorCode> = new Set([
   "TIMEOUT",
   "AI_ERROR",
+  "FORMAT_ERROR",
   "NETWORK",
 ]);
 

@@ -3,9 +3,10 @@
 // API 키는 이 서버 코드에서만 읽으며, 브라우저로는 절대 보내지 않는다 (PRD 7장).
 //
 // 이후 작업에서 이어 붙일 것:
-//   PLAN 14~16번  답변 형식 검사, 사례 표시, 사건번호 확인
+//   PLAN 15~16번  사례 표시, 사건번호 확인
 import OpenAI from "openai";
 import { buildInstructions } from "@/lib/prompt";
+import { ANSWER_FORMAT, parseAnswer } from "@/lib/schema";
 import { findPersonalInfo } from "@/lib/pii";
 import { ERROR_MESSAGES, SERVER_TIMEOUT_MS, type ErrorCode } from "@/lib/errors";
 import { AI_MODEL } from "@/lib/ai";
@@ -100,17 +101,26 @@ export async function POST(request: Request) {
 
     const materials = [formatMaterials(found), formatLookup(lookupItems)].filter(Boolean).join("\n\n");
 
-    const response = await client.responses.create(
-      {
-        model: AI_MODEL,
-        // PLAN 13번: PRD 5장의 AI 규칙 + 찾은 참고 자료
-        instructions: buildInstructions(materials),
-        input: messages.map((m) => ({ role: m.role, content: m.text })),
-      },
-      { signal: deadline },
-    );
+    // PLAN 14번: 답을 정해진 형식(ANSWER_FORMAT)으로 받고 검사한다.
+    // 형식이 틀리면 1번 다시 요청하고, 그래도 틀리면 "답변 형식 오류"로 알린다 (DESIGN.md 2장).
+    let answer = null;
+    for (let attempt = 0; attempt < 2 && !answer; attempt++) {
+      const response = await client.responses.create(
+        {
+          model: AI_MODEL,
+          // PLAN 13번: PRD 5장의 AI 규칙 + 찾은 참고 자료
+          instructions: buildInstructions(materials),
+          input: messages.map((m) => ({ role: m.role, content: m.text })),
+          text: { format: ANSWER_FORMAT },
+        },
+        { signal: deadline },
+      );
+      answer = parseAnswer(response.output_text);
+    }
+    if (!answer) return errorResponse("FORMAT_ERROR", 502);
+
     return Response.json({
-      answer: response.output_text,
+      answer,
       notice: lookup?.status === "failed" ? LOOKUP_FAILED_NOTICE : null,
       // 어떤 자료를 찾아 AI에 넘겼는지 (PLAN 16번 작업과 확인용)
       sources: {
