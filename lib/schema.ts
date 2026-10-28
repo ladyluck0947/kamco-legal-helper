@@ -17,6 +17,19 @@ function clean(text: string) {
 }
 
 const text = z.string().transform(clean);
+
+// AI가 법령명 칸에 조문 번호까지 넣는 경우(예: 법령명 "국유재산법 제72조", 조문 "제1항")를 바로잡는다.
+// 법령명에는 이름만 남기고, 조문 번호는 조문 칸 앞으로 옮긴다. 이미 조문 칸에 있으면 겹쳐 쓰지 않는다.
+const ARTICLE_IN_LAW = /^(.*?)\s*(제\d+조(?:의\d+)?.*)$/;
+function fixBasis(b: { law: string; article: string; effectiveDate: string }) {
+  const m = b.law.match(ARTICLE_IN_LAW);
+  if (!m) return b;
+  const law = m[1].trim();
+  const fromLaw = m[2].trim();
+  const articleNo = fromLaw.match(/제\d+조(?:의\d+)?/)![0];
+  const article = b.article.includes(articleNo) ? b.article : `${fromLaw} ${b.article}`.trim();
+  return { ...b, law, article };
+}
 const textList = (max: number) =>
   z.array(text).transform((list) => list.filter(Boolean).slice(0, max));
 
@@ -25,7 +38,9 @@ const answerSchema = z
     type: z.enum(["answer", "clarify", "out_of_scope", "no_basis"]),
     summary: textList(MAX_SUMMARY),
     detail: text,
-    legalBasis: z.array(z.object({ law: text, article: text, effectiveDate: text })),
+    legalBasis: z
+      .array(z.object({ law: text, article: text, effectiveDate: text }))
+      .transform((list) => list.map(fixBasis)),
     cases: z
       .array(
         z.object({
@@ -95,7 +110,7 @@ export const ANSWER_FORMAT = {
           additionalProperties: false,
           required: ["law", "article", "effectiveDate"],
           properties: {
-            law: { ...str, description: "법령명. 예: 국유재산법, 국유재산법 시행령" },
+            law: { ...str, description: "법령명만. 예: 국유재산법, 국유재산법 시행령. 조문 번호는 넣지 않는다" },
             article: { ...str, description: "조·항·호. 예: 제73조의3 제1항" },
             effectiveDate: { ...str, description: "참고 자료에 적힌 그 법령의 시행일. 예: 2026. 8. 20." },
           },
@@ -109,7 +124,7 @@ export const ANSWER_FORMAT = {
           additionalProperties: false,
           required: ["caseNumber", "date", "court", "gist", "partiallyPublic"],
           properties: {
-            caseNumber: { ...str, description: "참고 자료에 있는 사건번호·안건번호 그대로" },
+            caseNumber: { ...str, description: "참고 자료에 있는 사건번호·안건번호만 그대로. 예: 2011다76402. 법원명·날짜는 넣지 않는다" },
             date: { ...str, description: "선고·재결·회신일" },
             court: { ...str, description: "법원 또는 기관명" },
             gist: { ...str, description: "이 질문과 관련된 요지만 80자 이내로" },

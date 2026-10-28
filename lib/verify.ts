@@ -28,10 +28,16 @@ export function verifyCaseNumbers(answer: StructuredAnswer, allowedNumbers: stri
   const allowed = new Set(allowedNumbers.map(normalize));
   const removed = new Set<string>();
 
-  const cases = answer.cases.filter((c) => {
-    const ok = allowed.has(normalize(c.caseNumber));
-    if (!ok) removed.add(c.caseNumber);
-    return ok;
+  // AI가 사건번호 칸에 "2014. 7. 16. 선고 2011다76402"처럼 날짜·법원을 붙여 쓰는 경우가 있어,
+  // 칸 안에서 사건번호 모양만 뽑아 대조하고, 맞으면 사건번호만 남긴다.
+  const cases = answer.cases.flatMap((c) => {
+    const numbers = [...c.caseNumber.matchAll(CASE_NUMBER), ...c.caseNumber.matchAll(ITEM_NUMBER)].map((m) => m[0]);
+    const match = numbers.find((n) => allowed.has(normalize(n)));
+    if (!match) {
+      removed.add(c.caseNumber);
+      return [];
+    }
+    return [{ ...c, caseNumber: normalize(match) }];
   });
 
   const fix = (text: string) =>
