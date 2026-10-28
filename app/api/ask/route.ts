@@ -3,13 +3,13 @@
 // API 키는 이 서버 코드에서만 읽으며, 브라우저로는 절대 보내지 않는다 (PRD 7장).
 //
 // 이후 작업에서 이어 붙일 것:
-//   PLAN 10~16번  자료 찾기, AI 규칙 안내문, 답변 형식 검사
+//   PLAN 12번  자료가 부족할 때 국가법령정보센터 조회
+//   PLAN 13~16번  AI 규칙 안내문, 답변 형식 검사
 import OpenAI from "openai";
 import { findPersonalInfo } from "@/lib/pii";
 import { ERROR_MESSAGES, SERVER_TIMEOUT_MS, type ErrorCode } from "@/lib/errors";
-
-// 사용할 AI 모델. 응답 속도(30초 제한)와 품질을 함께 고려해 고른 기본값이다.
-const MODEL = "gpt-5.4-mini";
+import { AI_MODEL } from "@/lib/ai";
+import { formatMaterials, makeSearchTerms, searchMaterials } from "@/lib/search";
 
 // 한 번에 받을 대화 양의 상한 (너무 긴 요청으로 비용이 커지는 것을 막는다)
 const MAX_MESSAGES = 20;
@@ -17,7 +17,8 @@ const MAX_TEXT_LENGTH = 2000;
 
 // 임시 안내문. PRD 5장의 AI 규칙 전체는 PLAN 13번 작업에서 lib/prompt.ts로 옮겨 완성한다.
 const INSTRUCTIONS =
-  "너는 한국자산관리공사(캠코) 직원의 국유재산 관련 법률 질문에 답하는 도우미다. 한국어로 답한다.";
+  "너는 한국자산관리공사(캠코) 직원의 국유재산 관련 법률 질문에 답하는 도우미다. 한국어로 답한다. " +
+  "아래 참고 자료를 근거로 답하고, 근거로 쓴 조문은 법령명과 조문 번호를, 판례는 사건번호를 밝힌다.";
 
 type IncomingMessage = { role: "user" | "assistant"; text: string };
 
@@ -77,15 +78,38 @@ export async function POST(request: Request) {
   try {
     // 재시도는 1번까지만 하고, 30초 시계가 다 되면 재시도 중이라도 멈춘다.
     const client = new OpenAI({ apiKey, maxRetries: 1 });
+
+    // PLAN 11번: 질문을 법률 용어 검색어로 바꿔 관련 조문·판례를 고른다 (DESIGN.md 3장 ④).
+    // 검색어 만들기가 실패하면(시간 초과 제외) 질문 글을 그대로 검색어로 쓴다.
+    let terms: string[];
+    try {
+      terms = await makeSearchTerms(client, messages, deadline);
+    } catch (error) {
+      if (deadline.aborted) throw error;
+      console.error("[api/ask] 검색어 만들기 실패, 질문 글로 대신 검색:", error instanceof Error ? error.message : error);
+      terms = messages[messages.length - 1].text.split(/\s+/);
+    }
+    const found = searchMaterials(terms);
+
     const response = await client.responses.create(
       {
-        model: MODEL,
-        instructions: INSTRUCTIONS,
+        model: AI_MODEL,
+        instructions: `${INSTRUCTIONS}\n\n${formatMaterials(found)}`,
         input: messages.map((m) => ({ role: m.role, content: m.text })),
       },
       { signal: deadline },
     );
-    return Response.json({ answer: response.output_text });
+    return Response.json({
+      answer: response.output_text,
+      // 어떤 자료를 찾아 AI에 넘겼는지 (PLAN 12·16번 작업과 확인용)
+      sources: {
+        terms: found.terms,
+        laws: found.laws.map((l) => l.id),
+        cases: found.cases.map((c) => c.id),
+        lawsInsufficient: found.lawsInsufficient,
+        casesInsufficient: found.casesInsufficient,
+      },
+    });
   } catch (error) {
     // 30초를 넘겨 멈춘 경우 (DESIGN.md 2장 "시간 초과")
     if (deadline.aborted) {
