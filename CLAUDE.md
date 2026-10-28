@@ -51,6 +51,16 @@ npm run lint    # ESLint 검사
 
 테스트 도구는 아직 설정되어 있지 않다.
 
+자료·테스트 질문 관리 도구 (`scripts/` 폴더):
+
+```bash
+npm run cases:fetch -- <판례일련번호...>   # 국가법령정보센터 판례 원문 가져오기 (임시 폴더에 저장)
+npm run cases:add -- <핵심어 JSON 파일>    # 가져온 판례를 data/cases.json에 추가
+npm run check:questions                    # tests/questions.md의 근거·숫자가 data 원문과 맞는지 확인
+```
+
+심화 테스트 질문을 늘릴 때는 프로젝트 스킬 `add-deep-question`(`.claude/skills/add-deep-question/SKILL.md`)의 절차를 따른다. 판례·조문 내용과 정답 기준은 기억으로 쓰지 않고 반드시 원문에서 가져온다.
+
 ## 구조와 설정
 
 - Next.js 16 App Router, `src/` 폴더 없이 `app/`이 프로젝트 최상위에 있다. 경로 별칭 `@/*`는 프로젝트 최상위(`./*`)를 가리킨다.

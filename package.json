@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "cases:fetch": "node scripts/fetch-cases.mjs",
+    "cases:add": "node scripts/add-cases.mjs",
+    "check:questions": "node scripts/check-questions.mjs"
   },
   "dependencies": {
     "next": "16.4.3",
