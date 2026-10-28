@@ -3,10 +3,10 @@
 // API 키는 이 서버 코드에서만 읽으며, 브라우저로는 절대 보내지 않는다 (PRD 7장).
 //
 // 이후 작업에서 이어 붙일 것:
-//   PLAN 8번  30초 시간 제한과 오류 안내
 //   PLAN 10~16번  자료 찾기, AI 규칙 안내문, 답변 형식 검사
 import OpenAI from "openai";
 import { findPersonalInfo } from "@/lib/pii";
+import { ERROR_MESSAGES, SERVER_TIMEOUT_MS, type ErrorCode } from "@/lib/errors";
 
 // 사용할 AI 모델. 응답 속도(30초 제한)와 품질을 함께 고려해 고른 기본값이다.
 const MODEL = "gpt-5.4-mini";
@@ -20,6 +20,11 @@ const INSTRUCTIONS =
   "너는 한국자산관리공사(캠코) 직원의 국유재산 관련 법률 질문에 답하는 도우미다. 한국어로 답한다.";
 
 type IncomingMessage = { role: "user" | "assistant"; text: string };
+
+// 오류 응답: 오류 종류(code)와 화면에 보여 줄 문구를 함께 보낸다.
+function errorResponse(code: ErrorCode, status: number, message = ERROR_MESSAGES[code]) {
+  return Response.json({ error: message, code }, { status });
+}
 
 // 화면이 보낸 대화가 올바른 모양인지 확인한다. 문제가 있으면 오류 문구를 돌려준다.
 function validateMessages(value: unknown): IncomingMessage[] | string {
@@ -42,20 +47,21 @@ function validateMessages(value: unknown): IncomingMessage[] | string {
 }
 
 export async function POST(request: Request) {
+  // PLAN 8번: 요청을 받은 순간부터 30초를 잰다. 시간이 다 되면 진행 중인 AI 요청을 멈춘다.
+  // (이후 자료 찾기·국가법령정보센터 조회도 이 같은 시계 안에서 진행한다)
+  const deadline = AbortSignal.timeout(SERVER_TIMEOUT_MS);
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     // 키가 없을 때는 원인을 서버 기록에만 남기고, 화면에는 일반 오류 문구만 보낸다.
     console.error("[api/ask] OPENAI_API_KEY가 설정되어 있지 않습니다.");
-    return Response.json(
-      { error: "지금은 답변을 만들 수 없어요. 잠시 후 다시 시도해 주세요." },
-      { status: 500 },
-    );
+    return errorResponse("AI_ERROR", 500);
   }
 
   const body = await request.json().catch(() => null);
   const messages = validateMessages(body?.messages);
   if (typeof messages === "string") {
-    return Response.json({ error: messages }, { status: 400 });
+    return errorResponse("BAD_REQUEST", 400, messages);
   }
 
   // PLAN 7번: 화면 검사를 거치지 않은 요청에 대비해, AI로 보낼 질문 전부를 서버에서 다시 검사한다.
@@ -65,30 +71,29 @@ export async function POST(request: Request) {
     (m) => m.role === "user" && findPersonalInfo(m.text).length > 0,
   );
   if (hasPii) {
-    return Response.json(
-      {
-        error:
-          "개인정보로 보이는 내용이 있어 보내지 않았어요. 해당 부분을 지우고 다시 질문해 주세요.",
-        code: "PII_BLOCKED",
-      },
-      { status: 400 },
-    );
+    return errorResponse("PII_BLOCKED", 400);
   }
 
   try {
-    const client = new OpenAI({ apiKey });
-    const response = await client.responses.create({
-      model: MODEL,
-      instructions: INSTRUCTIONS,
-      input: messages.map((m) => ({ role: m.role, content: m.text })),
-    });
+    // 재시도는 1번까지만 하고, 30초 시계가 다 되면 재시도 중이라도 멈춘다.
+    const client = new OpenAI({ apiKey, maxRetries: 1 });
+    const response = await client.responses.create(
+      {
+        model: MODEL,
+        instructions: INSTRUCTIONS,
+        input: messages.map((m) => ({ role: m.role, content: m.text })),
+      },
+      { signal: deadline },
+    );
     return Response.json({ answer: response.output_text });
   } catch (error) {
-    // AI 서비스 오류 (DESIGN.md 2장 "AI 서비스 오류" 문구)
+    // 30초를 넘겨 멈춘 경우 (DESIGN.md 2장 "시간 초과")
+    if (deadline.aborted) {
+      console.error("[api/ask] 30초 시간 초과로 AI 요청을 멈췄습니다.");
+      return errorResponse("TIMEOUT", 504);
+    }
+    // 그 밖의 AI 서비스 오류 (DESIGN.md 2장 "AI 서비스 오류")
     console.error("[api/ask] AI 요청 실패:", error instanceof Error ? error.message : error);
-    return Response.json(
-      { error: "지금은 답변을 만들 수 없어요. 잠시 후 다시 시도해 주세요." },
-      { status: 502 },
-    );
+    return errorResponse("AI_ERROR", 502);
   }
 }
