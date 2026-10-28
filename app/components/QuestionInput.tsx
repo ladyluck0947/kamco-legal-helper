@@ -4,14 +4,21 @@
 // 입력한 글자를 화면이 기억해야 하므로 브라우저에서 동작하는 컴포넌트로 만든다.
 import { useState, type FormEvent } from "react";
 
-export default function QuestionInput() {
+export default function QuestionInput({
+  onSend,
+}: {
+  onSend: (text: string) => void;
+}) {
   const [question, setQuestion] = useState("");
   const isEmpty = question.trim() === "";
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     // 페이지가 새로고침되지 않도록 막는다.
-    // 질문을 대화 영역에 쌓고 서버로 보내는 일은 PLAN 3·9번 작업에서 연결한다.
     event.preventDefault();
+    if (isEmpty) return;
+    // 질문을 대화 목록으로 넘기고 입력창을 비운다.
+    onSend(question.trim());
+    setQuestion("");
   }
 
   return (

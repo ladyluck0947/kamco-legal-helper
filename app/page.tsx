@@ -1,7 +1,6 @@
 // 캠코 법률 도우미 첫 화면 (DESIGN.md 2장 화면 구성)
 // 위에서부터 머리글 → 대화 영역 → 입력 영역(화면 아래 고정) 순서로 놓는다.
-import ConversationArea from "./components/ConversationArea";
-import QuestionInput from "./components/QuestionInput";
+import Chat from "./components/Chat";
 
 export default function Home() {
   return (
@@ -18,13 +17,8 @@ export default function Home() {
         </div>
       </header>
 
-      {/* 대화 영역 */}
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-8">
-        <ConversationArea />
-      </main>
-
-      {/* 입력 영역 */}
-      <QuestionInput />
+      {/* 대화 영역 + 입력 영역 (대화 상태는 Chat이 관리) */}
+      <Chat />
     </div>
   );
 }
