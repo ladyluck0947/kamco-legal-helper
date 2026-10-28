@@ -3,10 +3,10 @@
 // API 키는 이 서버 코드에서만 읽으며, 브라우저로는 절대 보내지 않는다 (PRD 7장).
 //
 // 이후 작업에서 이어 붙일 것:
-//   PLAN 7번  서버 쪽 개인정보 재검사
 //   PLAN 8번  30초 시간 제한과 오류 안내
 //   PLAN 10~16번  자료 찾기, AI 규칙 안내문, 답변 형식 검사
 import OpenAI from "openai";
+import { findPersonalInfo } from "@/lib/pii";
 
 // 사용할 AI 모델. 응답 속도(30초 제한)와 품질을 함께 고려해 고른 기본값이다.
 const MODEL = "gpt-5.4-mini";
@@ -56,6 +56,23 @@ export async function POST(request: Request) {
   const messages = validateMessages(body?.messages);
   if (typeof messages === "string") {
     return Response.json({ error: messages }, { status: 400 });
+  }
+
+  // PLAN 7번: 화면 검사를 거치지 않은 요청에 대비해, AI로 보낼 질문 전부를 서버에서 다시 검사한다.
+  // 앞의 대화도 함께 AI로 넘어가므로 이번 질문만이 아니라 모든 질문을 본다.
+  // 개인정보 내용은 서버 기록에도 남기지 않는다.
+  const hasPii = messages.some(
+    (m) => m.role === "user" && findPersonalInfo(m.text).length > 0,
+  );
+  if (hasPii) {
+    return Response.json(
+      {
+        error:
+          "개인정보로 보이는 내용이 있어 보내지 않았어요. 해당 부분을 지우고 다시 질문해 주세요.",
+        code: "PII_BLOCKED",
+      },
+      { status: 400 },
+    );
   }
 
   try {
