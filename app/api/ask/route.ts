@@ -3,8 +3,9 @@
 // API 키는 이 서버 코드에서만 읽으며, 브라우저로는 절대 보내지 않는다 (PRD 7장).
 //
 // 이후 작업에서 이어 붙일 것:
-//   PLAN 15~16번  사례 표시, 사건번호 확인
+//   PLAN 17~18번  테스트 질문으로 성공 기준 확인
 import OpenAI from "openai";
+import { verifyCaseNumbers } from "@/lib/verify";
 import { buildInstructions } from "@/lib/prompt";
 import { ANSWER_FORMAT, parseAnswer } from "@/lib/schema";
 import { findPersonalInfo } from "@/lib/pii";
@@ -119,8 +120,18 @@ export async function POST(request: Request) {
     }
     if (!answer) return errorResponse("FORMAT_ERROR", 502);
 
+    // PLAN 16번: 답변 속 사건번호가 이번에 넘긴 자료에 실제로 있는지 대조하고, 없는 번호는 내보내지 않는다.
+    const allowedNumbers = [
+      ...found.cases.map((c) => c.caseNumber),
+      ...lookupItems.map((i) => i.number),
+    ];
+    const verified = verifyCaseNumbers(answer, allowedNumbers);
+    if (verified.removed.length > 0) {
+      console.error("[api/ask] 자료에 없는 사건번호를 걸러냄:", verified.removed.join(", "));
+    }
+
     return Response.json({
-      answer,
+      answer: verified.answer,
       notice: lookup?.status === "failed" ? LOOKUP_FAILED_NOTICE : null,
       // 어떤 자료를 찾아 AI에 넘겼는지 (PLAN 16번 작업과 확인용)
       sources: {
@@ -131,6 +142,7 @@ export async function POST(request: Request) {
         casesInsufficient: found.casesInsufficient,
         lookup: lookup?.status ?? "not-needed",
         lookupItems: lookupItems.map((i) => `${i.kind} ${i.number}`),
+        removedCaseNumbers: verified.removed,
       },
     });
   } catch (error) {
