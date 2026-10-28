@@ -5,18 +5,24 @@
 import { useState, type FormEvent } from "react";
 import { findPersonalInfo, type PiiMatch } from "@/lib/pii";
 
+// 입력 내용(value)은 Chat이 가지고 있다. 오류가 나면 Chat이 질문을 입력창에 다시 채워 넣기 위해서다.
 export default function QuestionInput({
+  value: question,
+  onChange,
   onSend,
+  disabled,
 }: {
+  value: string;
+  onChange: (value: string) => void;
   onSend: (text: string) => void;
+  disabled: boolean;
 }) {
-  const [question, setQuestion] = useState("");
   // 보내기를 눌렀을 때 발견된 개인정보 목록 (없으면 빈 배열)
   const [blocked, setBlocked] = useState<PiiMatch[]>([]);
   const isEmpty = question.trim() === "";
 
   function handleChange(value: string) {
-    setQuestion(value);
+    onChange(value);
     // 경고가 떠 있는 동안에는 고칠 때마다 다시 검사해, 다 지우면 경고를 바로 없앤다.
     if (blocked.length > 0) setBlocked(findPersonalInfo(value));
   }
@@ -24,7 +30,8 @@ export default function QuestionInput({
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     // 페이지가 새로고침되지 않도록 막는다.
     event.preventDefault();
-    if (isEmpty) return;
+    // 답을 기다리는 동안에는 새 질문을 보내지 않는다.
+    if (isEmpty || disabled) return;
 
     // PLAN 5번: 개인정보가 있으면 보내지 않고, 입력 내용은 그대로 둔다 (PRD 7장).
     const found = findPersonalInfo(question);
@@ -33,9 +40,8 @@ export default function QuestionInput({
       return;
     }
 
-    // 질문을 대화 목록으로 넘기고 입력창을 비운다.
+    // 질문을 대화 목록으로 넘긴다. 입력창 비우기는 Chat이 한다.
     onSend(question.trim());
-    setQuestion("");
   }
 
   return (
@@ -71,7 +77,7 @@ export default function QuestionInput({
           />
           <button
             type="submit"
-            disabled={isEmpty}
+            disabled={isEmpty || disabled}
             className="h-11 rounded-lg bg-blue-600 px-5 text-base font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:disabled:bg-zinc-700"
           >
             보내기
