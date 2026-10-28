@@ -18,6 +18,12 @@ function clean(text: string) {
 
 const text = z.string().transform(clean);
 
+// PRD 5장 must ①의 안내 문구
+const DEFAULT_NOTICE = {
+  out_of_scope: "이 도우미는 국유재산 관련 법률 질문에 답합니다. 국유재산과 관련된 질문을 해 주세요.",
+  no_basis: "확인된 근거가 없습니다. 법무 부서에 문의해 주세요.",
+} as const;
+
 // AI가 법령명 칸에 조문 번호까지 넣는 경우(예: 법령명 "국유재산법 제72조", 조문 "제1항")를 바로잡는다.
 // 법령명에는 이름만 남기고, 조문 번호는 조문 칸 앞으로 옮긴다. 이미 조문 칸에 있으면 겹쳐 쓰지 않는다.
 const ARTICLE_IN_LAW = /^(.*?)\s*(제\d+조(?:의\d+)?.*)$/;
@@ -57,6 +63,13 @@ const answerSchema = z
       ),
     clarifyQuestions: textList(MAX_CLARIFY),
     notice: text,
+  })
+  // 범위 밖·근거 없음인데 AI가 안내 문구 칸을 비우고 다른 칸에 썼으면 그 글을 쓰고,
+  // 그것도 없으면 PRD 5장에 정한 안내 문구로 채운다.
+  .transform((a) => {
+    if ((a.type !== "out_of_scope" && a.type !== "no_basis") || a.notice) return a;
+    const written = [a.summary.join(" "), a.detail].find(Boolean);
+    return { ...a, notice: written ?? DEFAULT_NOTICE[a.type] };
   })
   .superRefine((a, ctx) => {
     const missing = (message: string) => ctx.addIssue({ code: "custom", message });
