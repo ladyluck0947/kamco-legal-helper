@@ -3,13 +3,16 @@
 // API 키는 이 서버 코드에서만 읽으며, 브라우저로는 절대 보내지 않는다 (PRD 7장).
 //
 // 이후 작업에서 이어 붙일 것:
-//   PLAN 12번  자료가 부족할 때 국가법령정보센터 조회
 //   PLAN 13~16번  AI 규칙 안내문, 답변 형식 검사
 import OpenAI from "openai";
 import { findPersonalInfo } from "@/lib/pii";
 import { ERROR_MESSAGES, SERVER_TIMEOUT_MS, type ErrorCode } from "@/lib/errors";
 import { AI_MODEL } from "@/lib/ai";
 import { formatMaterials, makeSearchTerms, searchMaterials } from "@/lib/search";
+import { formatLookup, lookupLawCenter, type LookupResult } from "@/lib/law-api";
+
+// 국가법령정보센터 조회가 실패했을 때 답변 아래에 붙일 안내 (DESIGN.md 2장 "자료 조회 실패")
+const LOOKUP_FAILED_NOTICE = "국가법령정보센터 조회에 실패해 일부 자료만 참고했어요.";
 
 // 한 번에 받을 대화 양의 상한 (너무 긴 요청으로 비용이 커지는 것을 막는다)
 const MAX_MESSAGES = 20;
@@ -91,23 +94,36 @@ export async function POST(request: Request) {
     }
     const found = searchMaterials(terms);
 
+    // PLAN 12번: 넣어 둔 자료에 맞는 조문이나 판례가 하나도 없으면 국가법령정보센터를 조회해 보완한다.
+    // 조회가 실패해도 오류를 띄우지 않고, 넣어 둔 자료만으로 답한 뒤 안내 문구를 붙인다.
+    let lookup: LookupResult | null = null;
+    if (found.lawsInsufficient || found.casesInsufficient) {
+      lookup = await lookupLawCenter(terms, deadline);
+    }
+    const lookupItems = lookup?.status === "ok" ? lookup.items : [];
+
+    const materials = [formatMaterials(found), formatLookup(lookupItems)].filter(Boolean).join("\n\n");
+
     const response = await client.responses.create(
       {
         model: AI_MODEL,
-        instructions: `${INSTRUCTIONS}\n\n${formatMaterials(found)}`,
+        instructions: `${INSTRUCTIONS}\n\n${materials}`,
         input: messages.map((m) => ({ role: m.role, content: m.text })),
       },
       { signal: deadline },
     );
     return Response.json({
       answer: response.output_text,
-      // 어떤 자료를 찾아 AI에 넘겼는지 (PLAN 12·16번 작업과 확인용)
+      notice: lookup?.status === "failed" ? LOOKUP_FAILED_NOTICE : null,
+      // 어떤 자료를 찾아 AI에 넘겼는지 (PLAN 16번 작업과 확인용)
       sources: {
         terms: found.terms,
         laws: found.laws.map((l) => l.id),
         cases: found.cases.map((c) => c.id),
         lawsInsufficient: found.lawsInsufficient,
         casesInsufficient: found.casesInsufficient,
+        lookup: lookup?.status ?? "not-needed",
+        lookupItems: lookupItems.map((i) => `${i.kind} ${i.number}`),
       },
     });
   } catch (error) {
