@@ -36,7 +36,10 @@ const answerSchema = z
           partiallyPublic: z.boolean(),
         }),
       )
-      .transform((list) => list.slice(0, MAX_CASES)),
+      // PLAN 15번: 사건번호·날짜·법원(기관)명 중 하나라도 빠진 사례는 보여 주지 않고, 최대 3건만 남긴다.
+      .transform((list) =>
+        list.filter((c) => c.caseNumber && c.date && c.court).slice(0, MAX_CASES),
+      ),
     clarifyQuestions: textList(MAX_CLARIFY),
     notice: text,
   })
@@ -109,7 +112,7 @@ export const ANSWER_FORMAT = {
             caseNumber: { ...str, description: "참고 자료에 있는 사건번호·안건번호 그대로" },
             date: { ...str, description: "선고·재결·회신일" },
             court: { ...str, description: "법원 또는 기관명" },
-            gist: { ...str, description: "요지 2줄 이내" },
+            gist: { ...str, description: "이 질문과 관련된 요지만 80자 이내로" },
             partiallyPublic: { type: "boolean", description: "일부만 공개된 자료면 true" },
           },
         },

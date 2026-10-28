@@ -1,7 +1,7 @@
 // 답변 카드 (PLAN 14번, DESIGN.md 2장 "답변 카드")
 // 결론 요약 → 상세 설명 → 근거 조문(시행일) → 관련 사례 → 참고용 문구 순서로 보여 준다.
 // 답변 종류(일반/되묻기/범위 밖/근거 없음)마다 보이는 칸이 다르다 (DESIGN.md 3장 표).
-import type { StructuredAnswer } from "@/lib/answer";
+import type { CaseRef, StructuredAnswer } from "@/lib/answer";
 
 // PRD 5장: 모든 답변 끝에 붙는 문구. AI가 빠뜨리지 않도록 화면이 직접 붙인다.
 const DISCLAIMER = "참고용 정보이며, 최종 판단은 법무 부서에 확인하세요.";
@@ -46,6 +46,38 @@ export default function AnswerCard({
   );
 }
 
+// 사례 카드 하나 (PLAN 15번, DESIGN.md 2장 "사례 카드")
+// 사건번호·날짜·법원(기관)명을 따로 표시하고, 요지는 2줄을 넘으면 잘라서 보여 준다.
+function CaseItem({ item }: { item: CaseRef }) {
+  return (
+    <li className="rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700">
+      <dl className="flex flex-wrap gap-x-3 gap-y-0.5">
+        <div className="flex gap-1">
+          <dt className="text-zinc-500 dark:text-zinc-400">사건번호</dt>
+          <dd className="font-semibold">{item.caseNumber}</dd>
+        </div>
+        <div className="flex gap-1">
+          <dt className="text-zinc-500 dark:text-zinc-400">선고(재결)일</dt>
+          <dd>{item.date.replace(/\.?$/, ".")}</dd>
+        </div>
+        <div className="flex gap-1">
+          <dt className="text-zinc-500 dark:text-zinc-400">법원·기관</dt>
+          <dd>{item.court}</dd>
+        </div>
+      </dl>
+      <p className="mt-1 line-clamp-2 text-zinc-700 dark:text-zinc-300" title={item.gist}>
+        {item.gist}
+      </p>
+      {/* PRD 7장: 일부만 공개된 자료 안내 */}
+      {item.partiallyPublic && (
+        <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+          비공개 부분은 제공할 수 없습니다.
+        </p>
+      )}
+    </li>
+  );
+}
+
 function GeneralAnswer({ answer }: { answer: StructuredAnswer }) {
   return (
     <div className="space-y-4">
@@ -78,18 +110,15 @@ function GeneralAnswer({ answer }: { answer: StructuredAnswer }) {
         </ul>
       </section>
 
-      {/* 관련 사례 (표시 규칙은 PLAN 15번 작업에서 다듬는다) */}
+      {/* 관련 사례: 최대 3건 (PRD 5장 must ②) */}
       {answer.cases.length > 0 && (
         <section>
-          <h3 className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">관련 사례</h3>
+          <h3 className="text-sm font-semibold text-zinc-600 dark:text-zinc-300">
+            관련 사례 ({answer.cases.length}건)
+          </h3>
           <ul className="mt-1 space-y-2">
             {answer.cases.map((c, i) => (
-              <li key={i} className="rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700">
-                <p className="font-medium">
-                  {c.court} {c.date} {c.caseNumber}
-                </p>
-                <p className="mt-0.5 text-zinc-600 dark:text-zinc-300">{c.gist}</p>
-              </li>
+              <CaseItem key={i} item={c} />
             ))}
           </ul>
         </section>
