@@ -3,8 +3,9 @@
 // API 키는 이 서버 코드에서만 읽으며, 브라우저로는 절대 보내지 않는다 (PRD 7장).
 //
 // 이후 작업에서 이어 붙일 것:
-//   PLAN 13~16번  AI 규칙 안내문, 답변 형식 검사
+//   PLAN 14~16번  답변 형식 검사, 사례 표시, 사건번호 확인
 import OpenAI from "openai";
+import { buildInstructions } from "@/lib/prompt";
 import { findPersonalInfo } from "@/lib/pii";
 import { ERROR_MESSAGES, SERVER_TIMEOUT_MS, type ErrorCode } from "@/lib/errors";
 import { AI_MODEL } from "@/lib/ai";
@@ -17,11 +18,6 @@ const LOOKUP_FAILED_NOTICE = "국가법령정보센터 조회에 실패해 일�
 // 한 번에 받을 대화 양의 상한 (너무 긴 요청으로 비용이 커지는 것을 막는다)
 const MAX_MESSAGES = 20;
 const MAX_TEXT_LENGTH = 2000;
-
-// 임시 안내문. PRD 5장의 AI 규칙 전체는 PLAN 13번 작업에서 lib/prompt.ts로 옮겨 완성한다.
-const INSTRUCTIONS =
-  "너는 한국자산관리공사(캠코) 직원의 국유재산 관련 법률 질문에 답하는 도우미다. 한국어로 답한다. " +
-  "아래 참고 자료를 근거로 답하고, 근거로 쓴 조문은 법령명과 조문 번호를, 판례는 사건번호를 밝힌다.";
 
 type IncomingMessage = { role: "user" | "assistant"; text: string };
 
@@ -107,7 +103,8 @@ export async function POST(request: Request) {
     const response = await client.responses.create(
       {
         model: AI_MODEL,
-        instructions: `${INSTRUCTIONS}\n\n${materials}`,
+        // PLAN 13번: PRD 5장의 AI 규칙 + 찾은 참고 자료
+        instructions: buildInstructions(materials),
         input: messages.map((m) => ({ role: m.role, content: m.text })),
       },
       { signal: deadline },
