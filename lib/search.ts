@@ -159,7 +159,10 @@ export function formatMaterials(result: SearchResult): string {
   const caseText = result.cases.map(
     (c) =>
       `[${c.id}] ${c.court} ${c.decisionDate}. 선고 ${c.caseNumber} ${c.judgmentType}` +
-      `\n판시사항: ${c.holdings}\n판결요지: ${c.summary}\n(참고: ${c.note})`,
+      `\n판시사항: ${c.holdings}` +
+      // 원문에 판결요지가 없는 판례는 판시사항만 넘긴다.
+      (c.summary ? `\n판결요지: ${c.summary}` : "") +
+      `\n(참고: ${c.note})`,
   );
 
   return [
