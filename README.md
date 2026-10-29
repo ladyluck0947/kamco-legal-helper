@@ -1,36 +1,69 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 캠코 법률 도우미
 
-## Getting Started
+국유재산 업무 중 생기는 법률 질문에, 공개된 법령·판례·유권해석을 근거로 답해 주는 챗봇입니다.
+국유재산 업무를 처음 맡은 직원도 필요한 조문과 사례를 빠르게 찾을 수 있도록 만들었습니다.
 
-First, run the development server:
+> 실습 과제로 만든 프로젝트이며, 답변은 참고용입니다. 최종 판단은 법무 부서에 확인하세요.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## 해결하려는 문제
+
+국유재산법과 하위 법령, 판례, 유권해석이 여러 곳에 흩어져 있어 자료를 찾는 데 시간이 오래 걸리고,
+같은 질문이 법무 부서와 담당자에게 반복됩니다. 질문 하나로 근거까지 함께 받을 수 있게 합니다.
+
+## 주요 기능
+
+- **질문하면 근거와 함께 답변**: 결론 3문장 요약 → 상세 설명 → 근거 조문(법령명·조·항, 시행일) → 관련 판례·유권해석(최대 3건)
+- **종합 검토**: 국유재산법·시행령뿐 아니라 민법, 행정절차법 등 질문에 관련된 다른 법령의 조문도 국가법령정보센터에서 실시간으로 가져와 함께 검토하고, 검토한 자료(법령·조문·판례 수)를 답변에 한 줄로 보여 줍니다.
+- **지어내지 않기**: 답변의 사건번호와 근거 조문을 서버가 이번에 찾은 자료와 대조해, 자료에 없는 것은 화면에 내보내지 않습니다. 근거가 없으면 "확인된 근거가 없습니다"라고 안내합니다.
+- **되묻기·범위 안내**: 질문이 모호하면 먼저 되묻고, 국유재산과 무관한 질문은 범위를 안내합니다.
+- **개인정보 보호**: 주민등록번호·전화번호·계좌번호 형태는 AI에 보내기 전에 화면과 서버에서 막고, 답변에서도 가립니다. 질문과 답변은 서버에 저장하지 않고, 화면을 닫으면 사라집니다.
+
+## 동작 방식
+
+```
+질문 입력 → 개인정보 검사(화면·서버) → AI가 검색어와 관련 법령 선택
+→ 미리 넣어 둔 자료 + 국가법령정보센터 실시간 조회(판례·유권해석·조문)
+→ AI가 필요한 조문 선별 → AI가 정해진 형식으로 답변 → 서버가 사건번호·근거 조문·개인정보 검사 → 화면 표시
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 기술 스택
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Next.js 16 (App Router) + TypeScript + Tailwind CSS v4
+- OpenAI API (서버에서만 호출, 키는 환경변수로 관리)
+- 국가법령정보센터 Open API (법령·판례·유권해석 조회)
+- 배포: Vercel
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 직접 실행해 보기
 
-## Learn More
+```bash
+npm install
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+`.env` 파일에 아래 값을 넣어야 합니다. (이 파일은 저장소에 올라가지 않습니다)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| 이름 | 용도 |
+|---|---|
+| `OPENAI_API_KEY` | AI 답변 생성 (필수) |
+| `LAW_API_OC` | 국가법령정보센터 조회용 인증값 (없으면 실시간 조회를 건너뛰고 "일부 자료만 참고했어요"라고 안내) |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 기획·계획 문서
 
-## Deploy on Vercel
+- [PRD.md](PRD.md): 서비스 기획서 (문제 정의, 성공 기준, 기능·AI 규칙, 범위, 보안·개인정보)
+- [PLAN.md](PLAN.md): 개발 계획 (성공 기준, 작업 순서)
+- [DESIGN.md](DESIGN.md): 화면·데이터 흐름·파일 구성 설계
+- [CHECK.md](CHECK.md): 설계와 구현 비교, 성공 기준 판정, 보안 점검 결과
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 폴더 구조
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| 위치 | 내용 |
+|---|---|
+| `app/` | 화면(`components/`)과 서버 API(`api/ask/route.ts`) |
+| `lib/` | 개인정보 검사, 자료 찾기, 법령센터 조회, 답변 형식·검증, AI 규칙 |
+| `data/` | 미리 넣어 둔 공개 자료(국유재산법·시행령 주요 조문, 주요 판례) |
+| `tests/`, `scripts/` | 테스트 질문 30개와 측정 결과, 자료 관리 도구 |
+
+## 한계
+
+- 행정심판 재결례는 아직 다루지 않습니다.
+- 답변은 AI가 만든 참고용 정보이며, 법적 효력이 없습니다.
