@@ -17,32 +17,35 @@ export type PiiMatch = {
 const NOT_DIGIT_BEFORE = String.raw`(?<!\d)`;
 const NOT_DIGIT_AFTER = String.raw`(?!\d)`;
 
+// 숫자 묶음 사이의 구분: 하이픈·점·공백을 최대 3글자까지 허용한다. (예: "900101 - 1234567")
+const SEP = String.raw`[-.\s]{0,3}`;
+
 // 먼저 적은 규칙이 우선한다. (예: 01012345678은 계좌번호가 아니라 전화번호로 본다)
 const RULES: { type: PiiType; label: string; pattern: string }[] = [
   {
     // 주민등록번호·외국인등록번호: 생년월일 6자리 + 뒤 7자리 (뒷자리 첫 숫자 1~8)
     type: "resident",
     label: "주민등록번호",
-    pattern: String.raw`\d{6}[-\s]?[1-8]\d{6}`,
+    pattern: String.raw`\d{6}${SEP}[1-8]\d{6}`,
   },
   {
     // 휴대전화: 010·011·016·017·018·019
     type: "phone",
     label: "전화번호",
-    pattern: String.raw`01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}`,
+    pattern: String.raw`01[016789]${SEP}\d{3,4}${SEP}\d{4}`,
   },
   {
-    // 일반전화: 02, 031~064 지역번호, 070 인터넷전화
+    // 일반전화: 02, 031~064 지역번호, 070 인터넷전화 (지역번호를 괄호로 묶어도 찾는다)
     type: "phone",
     label: "전화번호",
-    pattern: String.raw`0(?:2|[3-6][1-5]|70)[-.\s]?\d{3,4}[-.\s]?\d{4}`,
+    pattern: String.raw`\(?0(?:2|[3-6][1-5]|70)\)?${SEP}\d{3,4}${SEP}\d{4}`,
   },
   {
-    // 계좌번호(하이픈 구분): 숫자 묶음 3~4개, 숫자 합계 10~14자리
+    // 계좌번호(하이픈·공백 구분): 숫자 묶음 3~4개, 숫자 합계 10~14자리
     // 날짜(2024-01-01, 8자리)는 자리 수가 모자라 걸리지 않는다.
     type: "account",
     label: "계좌번호",
-    pattern: String.raw`\d{2,6}-\d{2,6}-\d{2,6}(?:-\d{1,3})?`,
+    pattern: String.raw`\d{2,6}${SEP}\d{2,6}${SEP}\d{2,6}(?:${SEP}\d{1,3})?`,
   },
   {
     // 계좌번호(붙여 쓴 숫자): 11~14자리. 바로 뒤에 "원"이 오면 금액으로 보고 제외한다.
@@ -56,8 +59,18 @@ function countDigits(text: string) {
   return text.replace(/\D/g, "").length;
 }
 
+// 검사하기 좋게 모양만 통일한다. 글자 수는 그대로여야 표시 위치가 어긋나지 않는다.
+// 전각 숫자(０-９)는 일반 숫자로, 긴 줄표(– — − ‐ ‑ ‒ ―)는 하이픈으로, 보이지 않는 글자는 공백으로 바꾼다.
+function normalize(text: string): string {
+  return text
+    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/[‐-―−－]/g, "-")
+    .replace(/[​-‍⁠﻿]/g, " ");
+}
+
 // 질문에서 숫자 형태의 개인정보를 모두 찾아 앞에서부터 순서대로 돌려준다.
-export function findPersonalInfo(text: string): PiiMatch[] {
+export function findPersonalInfo(original: string): PiiMatch[] {
+  const text = normalize(original);
   const found: PiiMatch[] = [];
 
   for (const rule of RULES) {
@@ -79,7 +92,7 @@ export function findPersonalInfo(text: string): PiiMatch[] {
       const overlaps = found.some((f) => start < f.end && end > f.start);
       if (overlaps) continue;
 
-      found.push({ type: rule.type, label: rule.label, text: match[0], start, end });
+      found.push({ type: rule.type, label: rule.label, text: original.slice(start, end), start, end });
     }
   }
 

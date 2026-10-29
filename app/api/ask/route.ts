@@ -79,11 +79,9 @@ export async function POST(request: Request) {
   }
 
   // PLAN 7번: 화면 검사를 거치지 않은 요청에 대비해, AI로 보낼 질문 전부를 서버에서 다시 검사한다.
-  // 앞의 대화도 함께 AI로 넘어가므로 이번 질문만이 아니라 모든 질문을 본다.
+  // 앞의 대화도 함께 AI로 넘어가므로 이번 질문만이 아니라 앞 질문과 챗봇 답변 칸까지 모두 본다.
   // 개인정보 내용은 서버 기록에도 남기지 않는다.
-  const hasPii = messages.some(
-    (m) => m.role === "user" && findPersonalInfo(m.text).length > 0,
-  );
+  const hasPii = messages.some((m) => findPersonalInfo(m.text).length > 0);
   if (hasPii) {
     return errorResponse("PII_BLOCKED", 400);
   }
