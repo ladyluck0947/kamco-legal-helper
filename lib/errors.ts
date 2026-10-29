@@ -7,7 +7,8 @@ export type ErrorCode =
   | "AI_ERROR"
   | "BAD_REQUEST"
   | "FORMAT_ERROR"
-  | "NETWORK";
+  | "NETWORK"
+  | "RATE_LIMITED";
 
 export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   PII_BLOCKED:
@@ -17,6 +18,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   BAD_REQUEST: "질문을 처리할 수 없어요. 새로고침 후 다시 질문해 주세요.",
   FORMAT_ERROR: "답변을 정리하지 못했어요. 질문을 조금 바꿔서 다시 시도해 주세요.",
   NETWORK: "인터넷 연결을 확인한 뒤 다시 시도해 주세요.",
+  RATE_LIMITED: "질문이 너무 자주 들어오고 있어요. 1분쯤 기다린 뒤 다시 시도해 주세요.",
 };
 
 // [다시 시도] 버튼을 보여 줄 오류 (개인정보 차단은 질문을 고쳐야 하므로 제외)
@@ -25,6 +27,7 @@ export const RETRYABLE: ReadonlySet<ErrorCode> = new Set([
   "AI_ERROR",
   "FORMAT_ERROR",
   "NETWORK",
+  "RATE_LIMITED",
 ]);
 
 // 30초 시간 제한 (DESIGN.md 3장 "30초 시간 제한의 기준")

@@ -9,6 +9,7 @@ import { maskAnswerPersonalInfo, verifyCaseNumbers, verifyLegalBasis } from "@/l
 import { buildInstructions } from "@/lib/prompt";
 import { ANSWER_FORMAT, parseAnswer } from "@/lib/schema";
 import { findPersonalInfo } from "@/lib/pii";
+import { allowRequest, clientKey } from "@/lib/rate-limit";
 import { ERROR_MESSAGES, MAX_MESSAGES, SERVER_TIMEOUT_MS, type ErrorCode } from "@/lib/errors";
 import { askAI } from "@/lib/ai";
 import { formatMaterials, makeSearchTerms, searchMaterials, selectArticles } from "@/lib/search";
@@ -90,6 +91,13 @@ export async function POST(request: Request) {
   const hasPii = messages.some((m) => findPersonalInfo(m.text).length > 0);
   if (hasPii) {
     return errorResponse("PII_BLOCKED", 400);
+  }
+
+  // 호출 횟수 제한: 같은 접속 주소에서 1분 5번·1시간 40번을 넘기면 AI를 부르기 전에 막는다 (lib/rate-limit.ts).
+  // 개발 중에는 측정 도구가 질문을 연달아 보내므로 배포(production) 환경에서만 적용한다.
+  if (process.env.NODE_ENV === "production" && !allowRequest(clientKey(request))) {
+    console.error("[api/ask] 호출 횟수 제한에 걸린 요청을 막음");
+    return errorResponse("RATE_LIMITED", 429);
   }
 
   try {
@@ -224,7 +232,8 @@ export async function POST(request: Request) {
 
     return Response.json({
       answer: { ...safe.answer, reviewed },
-      notice: lookup.status === "failed" || lawLookup.status === "failed" ? LOOKUP_FAILED_NOTICE : null,
+      // 조회가 실패했거나, 인증값(LAW_API_OC)이 없어 아예 건너뛴 경우에도 "일부 자료만 참고했다"고 알린다.
+      notice: lookup.status !== "ok" || lawLookup.status !== "ok" ? LOOKUP_FAILED_NOTICE : null,
       // 어떤 자료를 찾아 AI에 넘겼는지 (PLAN 16번 작업과 확인용)
       sources: {
         terms: found.terms,
