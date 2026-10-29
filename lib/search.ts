@@ -6,6 +6,7 @@ import type OpenAI from "openai";
 import lawsData from "../data/laws.json";
 import casesData from "../data/cases.json";
 import { AI_MODEL } from "./ai";
+import type { RelatedLawRequest } from "./law-text";
 
 export type LawItem = (typeof lawsData)[number];
 export type CaseItem = (typeof casesData)[number];
@@ -32,12 +33,15 @@ const RECENT_MESSAGES = 4;
 
 type ChatMessage = { role: "user" | "assistant"; text: string };
 
-// 1) 질문 → 법률 용어 검색어 (AI에 짧게 요청)
+// 검색 계획: 법률 용어 검색어와, 함께 봐야 할 관련 법령 (PRD 6장 "관련 법령")
+export type SearchPlan = { terms: string[]; relatedLaws: RelatedLawRequest[] };
+
+// 1) 질문 → 법률 용어 검색어 + 관련 법령 이름 (AI에 짧게 요청)
 export async function makeSearchTerms(
   client: OpenAI,
   messages: ChatMessage[],
   signal: AbortSignal,
-): Promise<string[]> {
+): Promise<SearchPlan> {
   const recent = messages
     .slice(-RECENT_MESSAGES)
     .map((m) => `${m.role === "user" ? "직원" : "챗봇"}: ${m.text}`)
@@ -49,19 +53,38 @@ export async function makeSearchTerms(
       instructions:
         "너는 국유재산 법률 자료 검색을 돕는다. 대화의 마지막 직원 질문을 국유재산법령·판례에서 찾기 좋은 법률 용어 검색어 3~5개로 바꿔라. " +
         "일상어는 법률 용어로 바꾸고(예: 허락 없이 사용 → 무단점유, 임대료 → 대부료), 관련 조문 번호를 알면 '제72조'처럼 넣어라. " +
-        "앞 대화에 이어지는 질문이면 앞 대화의 주제를 반영하라.",
+        "앞 대화에 이어지는 질문이면 앞 대화의 주제를 반영하라. " +
+        "또한 이 질문에 답하려면 국유재산법·시행령 외에 함께 봐야 하는 다른 현행 법령이 있으면 relatedLaws에 최대 4개 넣어라. " +
+        "name은 약칭이 아닌 정식 법령명이어야 한다(예: 민법, 행정절차법, 국세징수법, 급경사지 재해예방에 관한 법률). " +
+        "법률이 세부 내용을 '대통령령으로 정한다'고 위임하는 경우가 많으므로, 질문이 대상·범위·기준·요율처럼 세부 내용에 걸려 있으면 그 법의 시행령(예: 급경사지 재해예방에 관한 법률 시행령)도 따로 넣어라. " +
+        "keywords는 그 법에서 찾을 법률 용어 2~4개, articles는 조문 번호를 확실히 알 때만(예: 제162조) 넣고 모르면 빈 배열로 둔다. " +
+        "국유재산법이나 그 시행령에서 더 필요한 조문이 있으면 그 법도 넣을 수 있다. 다른 법령이 필요 없으면 빈 배열로 둔다. " +
+        "질문에 나오지 않는 법령을 억지로 넣지 않는다.",
       input: recent,
       text: {
         format: {
           type: "json_schema",
-          name: "search_terms",
+          name: "search_plan",
           strict: true,
           schema: {
             type: "object",
             properties: {
               terms: { type: "array", items: { type: "string" } },
+              relatedLaws: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string" },
+                    keywords: { type: "array", items: { type: "string" } },
+                    articles: { type: "array", items: { type: "string" } },
+                  },
+                  required: ["name", "keywords", "articles"],
+                  additionalProperties: false,
+                },
+              },
             },
-            required: ["terms"],
+            required: ["terms", "relatedLaws"],
             additionalProperties: false,
           },
         },
@@ -70,8 +93,21 @@ export async function makeSearchTerms(
     { signal },
   );
 
-  const parsed = JSON.parse(response.output_text) as { terms: string[] };
-  return parsed.terms.map((t) => t.trim()).filter(Boolean).slice(0, 5);
+  const parsed = JSON.parse(response.output_text) as {
+    terms: string[];
+    relatedLaws: RelatedLawRequest[];
+  };
+  return {
+    terms: parsed.terms.map((t) => t.trim()).filter(Boolean).slice(0, 5),
+    relatedLaws: parsed.relatedLaws
+      .map((l) => ({
+        name: l.name.trim(),
+        keywords: l.keywords.map((k) => k.trim()).filter(Boolean).slice(0, 4),
+        articles: l.articles.map((a) => a.trim()).filter(Boolean).slice(0, 4),
+      }))
+      .filter((l) => l.name)
+      .slice(0, 4),
+  };
 }
 
 // 검색어를 비교하기 좋게 다듬는다 (띄어쓰기 차이 무시)

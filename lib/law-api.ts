@@ -7,7 +7,7 @@
 // 개발 중(npm run dev)에 LAW_API_OC가 없으면, API 안내 문서에 공개된 시험용 값("test")으로 동작을 확인한다.
 // 배포(Vercel)에서는 반드시 직접 신청한 인증값을 LAW_API_OC로 넣어야 하며, 없으면 조회를 건너뛴다.
 
-const BASE = "https://www.law.go.kr/DRF";
+export const BASE = "https://www.law.go.kr/DRF";
 const MAX_RESULTS = 3; // DESIGN.md: 결과 중 상위 3건을 추가
 const CANDIDATES = 20; // 해석례 목록에서 먼저 받아 볼 개수
 const PRECEDENT_LIST = 40; // 판례 본문 검색 목록에서 받아 볼 개수
@@ -25,7 +25,7 @@ export type LookupItem = {
   link: string;
 };
 
-function getOC(): string | null {
+export function getOC(): string | null {
   const oc = process.env.LAW_API_OC?.trim();
   if (oc) return oc;
   return process.env.NODE_ENV === "development" ? "test" : null;
@@ -59,7 +59,7 @@ function clean(text: unknown): string {
 }
 
 // 국가법령정보센터는 가끔 일시적으로 404·5xx를 돌려주므로, 실패하면 1번 다시 시도한다.
-async function getJson(url: string, signal: AbortSignal) {
+export async function getJson(url: string, signal: AbortSignal) {
   let status = 0;
   for (let attempt = 0; attempt < 2; attempt++) {
     const response = await fetch(url, { signal });
@@ -71,7 +71,7 @@ async function getJson(url: string, signal: AbortSignal) {
 
 // 여러 요청 중 성공한 것만 모은다 (자료 한 건이 실패해도 나머지는 살린다).
 // 30초 시간 초과는 위로 넘겨 전체 요청을 멈추게 한다.
-async function settled<T>(promises: Promise<T>[], signal: AbortSignal): Promise<{ values: T[]; failed: number }> {
+export async function settled<T>(promises: Promise<T>[], signal: AbortSignal): Promise<{ values: T[]; failed: number }> {
   const results = await Promise.allSettled(promises);
   if (signal.aborted) throw signal.reason;
   const values = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
@@ -84,7 +84,7 @@ async function settled<T>(promises: Promise<T>[], signal: AbortSignal): Promise<
 }
 
 // 목록 응답에서 항목 배열을 꺼낸다 (결과가 1건이면 배열이 아닌 객체로 오는 경우 대비)
-function asArray<T>(value: T | T[] | undefined): T[] {
+export function asArray<T>(value: T | T[] | undefined): T[] {
   if (!value) return [];
   return Array.isArray(value) ? value : [value];
 }

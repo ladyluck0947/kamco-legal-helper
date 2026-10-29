@@ -13,6 +13,13 @@ import { ERROR_MESSAGES, SERVER_TIMEOUT_MS, type ErrorCode } from "@/lib/errors"
 import { AI_MODEL } from "@/lib/ai";
 import { formatMaterials, makeSearchTerms, searchMaterials } from "@/lib/search";
 import { formatLookup, lookupLawCenter, type LookupResult } from "@/lib/law-api";
+import {
+  articleKey,
+  formatLawArticles,
+  lookupRelatedLaws,
+  type LawLookupResult,
+  type RelatedLawRequest,
+} from "@/lib/law-text";
 
 // 국가법령정보센터 조회가 실패했을 때 답변 아래에 붙일 안내 (DESIGN.md 2장 "자료 조회 실패")
 const LOOKUP_FAILED_NOTICE = "국가법령정보센터 조회에 실패해 일부 자료만 참고했어요.";
@@ -84,9 +91,13 @@ export async function POST(request: Request) {
 
     // PLAN 11번: 질문을 법률 용어 검색어로 바꿔 관련 조문·판례를 고른다 (DESIGN.md 3장 ④).
     // 검색어 만들기가 실패하면(시간 초과 제외) 질문 글을 그대로 검색어로 쓴다.
+    // 이때 AI가 함께 볼 관련 법령 이름(relatedLaws)도 고른다 (PRD 6장 "관련 법령").
     let terms: string[];
+    let relatedLaws: RelatedLawRequest[] = [];
     try {
-      terms = await makeSearchTerms(client, messages, deadline);
+      const plan = await makeSearchTerms(client, messages, deadline);
+      terms = plan.terms;
+      relatedLaws = plan.relatedLaws;
     } catch (error) {
       if (deadline.aborted) throw error;
       console.error("[api/ask] 검색어 만들기 실패, 질문 글로 대신 검색:", error instanceof Error ? error.message : error);
@@ -100,21 +111,40 @@ export async function POST(request: Request) {
     // 조회가 실패해도 오류를 띄우지 않고, 넣어 둔 자료만으로 답한 뒤 안내 문구를 붙인다.
     // 조회는 최대 LOOKUP_TIMEOUT_MS까지만 기다린다. 국가법령정보센터가 느려도 30초 안에 답을 만들 시간을 남기기 위해서다.
     // 이 시간을 넘기면 조회 실패로 보고, 넣어 둔 자료만으로 답한다.
-    let lookup: LookupResult;
-    try {
-      lookup = await lookupLawCenter(
-        terms,
-        AbortSignal.any([deadline, AbortSignal.timeout(LOOKUP_TIMEOUT_MS)]),
-        { precedents: true, interpretations: true, excludeCaseNumbers: found.cases.map((c) => c.caseNumber) },
-      );
-    } catch (error) {
-      if (deadline.aborted) throw error;
-      console.error(`[api/ask] 국가법령정보센터 조회가 ${LOOKUP_TIMEOUT_MS / 1000}초를 넘겨 건너뜀`);
-      lookup = { status: "failed" };
-    }
+    // 판례·유권해석 조회와, 질문에 필요한 다른 법령의 조문 조회를 함께 시작해 같은 시간 제한 안에서 기다린다.
+    const lookupSignal = AbortSignal.any([deadline, AbortSignal.timeout(LOOKUP_TIMEOUT_MS)]);
+    const guarded = async <T,>(run: () => Promise<T>): Promise<T | { status: "failed" }> => {
+      try {
+        return await run();
+      } catch (error) {
+        if (deadline.aborted) throw error;
+        console.error(`[api/ask] 국가법령정보센터 조회가 실패했거나 ${LOOKUP_TIMEOUT_MS / 1000}초를 넘겨 건너뜀`);
+        return { status: "failed" };
+      }
+    };
+    const [lookup, lawLookup]: [LookupResult, LawLookupResult] = await Promise.all([
+      guarded(() =>
+        lookupLawCenter(terms, lookupSignal, {
+          precedents: true,
+          interpretations: true,
+          excludeCaseNumbers: found.cases.map((c) => c.caseNumber),
+        }),
+      ),
+      // 이미 data 폴더에서 골라 AI에 넘기는 조문은 다시 가져오지 않는다.
+      guarded(() =>
+        lookupRelatedLaws(
+          relatedLaws,
+          lookupSignal,
+          new Set(found.laws.map((l) => articleKey(l.law, l.article))),
+        ),
+      ),
+    ]);
     const lookupItems = lookup.status === "ok" ? lookup.items : [];
+    const lawArticles = lawLookup.status === "ok" ? lawLookup.articles : [];
 
-    const materials = [formatMaterials(found), formatLookup(lookupItems)].filter(Boolean).join("\n\n");
+    const materials = [formatMaterials(found), formatLookup(lookupItems), formatLawArticles(lawArticles)]
+      .filter(Boolean)
+      .join("\n\n");
 
     // PLAN 14번: 답을 정해진 형식(ANSWER_FORMAT)으로 받고 검사한다.
     // 형식이 틀리면 1번 다시 요청하고, 그래도 틀리면 "답변 형식 오류"로 알린다 (DESIGN.md 2장).
@@ -152,7 +182,7 @@ export async function POST(request: Request) {
 
     return Response.json({
       answer: safe.answer,
-      notice: lookup.status === "failed" ? LOOKUP_FAILED_NOTICE : null,
+      notice: lookup.status === "failed" || lawLookup.status === "failed" ? LOOKUP_FAILED_NOTICE : null,
       // 어떤 자료를 찾아 AI에 넘겼는지 (PLAN 16번 작업과 확인용)
       sources: {
         terms: found.terms,
@@ -162,6 +192,12 @@ export async function POST(request: Request) {
         casesInsufficient: found.casesInsufficient,
         lookup: lookup.status,
         lookupItems: lookupItems.map((i) => `${i.kind} ${i.number}`),
+        // AI가 고른 관련 법령과, 실제로 가져온 조문
+        relatedLawRequests: relatedLaws.map((l) => l.name),
+        lawLookup: lawLookup.status,
+        lawLookupLaws: lawLookup.status === "ok" ? lawLookup.laws : [],
+        lawLookupNotFound: lawLookup.status === "ok" ? lawLookup.notFound : [],
+        lawArticles: lawArticles.map((a) => `${a.law} ${a.article}`),
         removedCaseNumbers: verified.removed,
         maskedPersonalInfo: safe.masked,
       },
