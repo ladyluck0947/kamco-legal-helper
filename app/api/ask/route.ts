@@ -171,6 +171,8 @@ export async function POST(request: Request) {
       const response = await client.responses.create(
         {
           model: AI_MODEL,
+          // PRD 7장: 질문·답변을 OpenAI 쪽에도 저장하지 않는다. (저장 기본값을 끈다)
+          store: false,
           // PLAN 13번: PRD 5장의 AI 규칙 + 찾은 참고 자료
           instructions: buildInstructions(materials),
           input: messages.map((m) => ({ role: m.role, content: m.text })),

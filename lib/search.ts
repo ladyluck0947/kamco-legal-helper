@@ -50,6 +50,7 @@ export async function makeSearchTerms(
   const response = await client.responses.create(
     {
       model: AI_MODEL,
+      store: false, // PRD 7장: 질문을 OpenAI 쪽에도 저장하지 않는다.
       instructions:
         "너는 국유재산 법률 자료 검색을 돕는다. 대화의 마지막 직원 질문을 국유재산법령·판례에서 찾기 좋은 법률 용어 검색어 3~5개로 바꿔라. " +
         "일상어는 법률 용어로 바꾸고(예: 허락 없이 사용 → 무단점유, 임대료 → 대부료), 관련 조문 번호를 알면 '제72조'처럼 넣어라. " +
@@ -142,6 +143,7 @@ export async function selectArticles(
   const response = await client.responses.create(
     {
       model: AI_MODEL,
+      store: false, // PRD 7장: 질문을 OpenAI 쪽에도 저장하지 않는다.
       instructions:
         "너는 국유재산 업무 법률 질문에 답하기 위한 조문 선별을 돕는다. 아래 후보 조문 중에서 이 질문에 답하는 데 직접 필요한 조문의 번호만 골라라. " +
         "질문의 쟁점에 적용되는 조문, 그 조문이 세부 내용을 위임한 시행령 조문, 인용·준용 관계로 이어져 결론에 영향을 주는 조문을 고른다. " +
