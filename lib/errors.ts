@@ -31,3 +31,6 @@ export const RETRYABLE: ReadonlySet<ErrorCode> = new Set([
 // 서버는 요청을 받은 순간부터 30초를 재고, 화면은 인터넷 문제에 대비해 5초 여유를 더 기다린다.
 export const SERVER_TIMEOUT_MS = 30_000;
 export const CLIENT_TIMEOUT_MS = SERVER_TIMEOUT_MS + 5_000;
+
+// 한 대화에서 서버가 받는 메시지 수(질문+답변). 화면도 이 수를 넘기기 전에 "새 대화"를 안내한다.
+export const MAX_MESSAGES = 20;

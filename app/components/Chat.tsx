@@ -9,6 +9,7 @@ import QuestionInput from "./QuestionInput";
 import {
   CLIENT_TIMEOUT_MS,
   ERROR_MESSAGES,
+  MAX_MESSAGES,
   RETRYABLE,
   type ErrorCode,
 } from "@/lib/errors";
@@ -106,8 +107,40 @@ export default function Chat() {
     });
   }
 
+  // 화면의 대화·입력·오류를 모두 비운다. (서버에는 저장된 것이 없으므로 화면만 비우면 된다)
+  function handleNewChat() {
+    if (isWaiting) return;
+    setMessages([]);
+    setDraft("");
+    setError(null);
+  }
+
+  const isFull = messages.length >= MAX_MESSAGES;
+
   return (
     <>
+      {/* 머리글: 서비스 이름, 한 줄 소개, 새 대화 버튼 */}
+      <header className="border-b border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="mx-auto flex w-full max-w-3xl items-center justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+              캠코 법률 도우미
+            </h1>
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+              국유재산 법률 질문에 공개 자료를 근거로 답합니다
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleNewChat}
+            disabled={isWaiting || (messages.length === 0 && !draft && !error)}
+            className="shrink-0 rounded-lg border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            새 대화
+          </button>
+        </div>
+      </header>
+
       {/* 대화 영역 */}
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-8">
         <ConversationArea
@@ -118,12 +151,17 @@ export default function Chat() {
         />
       </main>
 
-      {/* 입력 영역 */}
+      {/* 입력 영역 (대화가 한도에 닿으면 "새 대화"를 안내하고 입력을 막는다) */}
+      {isFull && (
+        <p className="mx-auto w-full max-w-3xl px-6 pb-2 text-sm text-amber-700 dark:text-amber-400">
+          대화가 길어졌어요. 위의 &quot;새 대화&quot;를 눌러 새로 질문해 주세요.
+        </p>
+      )}
       <QuestionInput
         value={draft}
         onChange={setDraft}
         onSend={handleSend}
-        disabled={isWaiting}
+        disabled={isWaiting || isFull}
       />
     </>
   );

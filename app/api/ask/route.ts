@@ -9,7 +9,7 @@ import { maskAnswerPersonalInfo, verifyCaseNumbers } from "@/lib/verify";
 import { buildInstructions } from "@/lib/prompt";
 import { ANSWER_FORMAT, parseAnswer } from "@/lib/schema";
 import { findPersonalInfo } from "@/lib/pii";
-import { ERROR_MESSAGES, SERVER_TIMEOUT_MS, type ErrorCode } from "@/lib/errors";
+import { ERROR_MESSAGES, MAX_MESSAGES, SERVER_TIMEOUT_MS, type ErrorCode } from "@/lib/errors";
 import { AI_MODEL } from "@/lib/ai";
 import { formatMaterials, makeSearchTerms, searchMaterials, selectArticles } from "@/lib/search";
 import { formatLookup, lookupLawCenter, type LookupResult } from "@/lib/law-api";
@@ -30,7 +30,6 @@ const SELECT_ABOVE = 6;
 const SELECT_FALLBACK = 12;
 
 // 한 번에 받을 대화 양의 상한 (너무 긴 요청으로 비용이 커지는 것을 막는다)
-const MAX_MESSAGES = 20;
 const MAX_TEXT_LENGTH = 2000;
 
 type IncomingMessage = { role: "user" | "assistant"; text: string };
@@ -43,7 +42,7 @@ function errorResponse(code: ErrorCode, status: number, message = ERROR_MESSAGES
 // 화면이 보낸 대화가 올바른 모양인지 확인한다. 문제가 있으면 오류 문구를 돌려준다.
 function validateMessages(value: unknown): IncomingMessage[] | string {
   if (!Array.isArray(value) || value.length === 0) return "대화 내용이 없어요.";
-  if (value.length > MAX_MESSAGES) return "대화가 너무 길어요. 새로고침 후 다시 질문해 주세요.";
+  if (value.length > MAX_MESSAGES) return "대화가 너무 길어요. '새 대화'를 눌러 다시 질문해 주세요.";
 
   for (const item of value) {
     const ok =
