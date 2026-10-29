@@ -261,6 +261,8 @@ export function formatMaterials(result: SearchResult): string {
       `\n판시사항: ${c.holdings}` +
       // 원문에 판결요지가 없는 판례는 판시사항만 넘긴다.
       (c.summary ? `\n판결요지: ${c.summary}` : "") +
+      // 일부만 공개된 자료는 AI가 알 수 있게 표시한다 (PRD 7장 "비공개 부분은 제공할 수 없습니다").
+      (c.partiallyPublic ? "\n(일부만 공개된 자료: 공개된 부분까지만 쓰고 나머지는 '비공개 부분은 제공할 수 없습니다'라고 밝힐 것)" : "") +
       `\n(참고: ${c.note})`,
   );
 

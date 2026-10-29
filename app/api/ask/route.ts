@@ -208,6 +208,13 @@ export async function POST(request: Request) {
       console.error("[api/ask] 자료에 없는 사건번호를 걸러냄:", verified.removed.join(", "));
     }
 
+    // 일부만 공개된 자료인지는 AI의 판단이 아니라 자료에 적힌 값으로 정해 화면에 "비공개 부분" 표시가 정확히 나가게 한다.
+    const partial = new Set(found.cases.filter((c) => c.partiallyPublic).map((c) => c.caseNumber.replace(/\s+/g, "")));
+    verified.answer = {
+      ...verified.answer,
+      cases: verified.answer.cases.map((c) => ({ ...c, partiallyPublic: partial.has(c.caseNumber.replace(/\s+/g, "")) })),
+    };
+
     // 근거 조문도 같은 방식으로 대조한다. 이번에 넘긴 조문(data 폴더 + 실시간 조회)에 없는 조문은 내보내지 않는다.
     const checkedBasis = verifyLegalBasis(verified.answer, [
       ...found.laws.map((l) => ({ law: l.law, article: l.article, effectiveDate: l.effectiveDate })),
