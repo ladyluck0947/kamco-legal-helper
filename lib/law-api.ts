@@ -55,10 +55,29 @@ function clean(text: unknown): string {
     .trim();
 }
 
+// 국가법령정보센터는 가끔 일시적으로 404·5xx를 돌려주므로, 실패하면 1번 다시 시도한다.
 async function getJson(url: string, signal: AbortSignal) {
-  const response = await fetch(url, { signal });
-  if (!response.ok) throw new Error(`국가법령정보센터 응답 오류 ${response.status}`);
-  return response.json();
+  let status = 0;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch(url, { signal });
+    if (response.ok) return response.json();
+    status = response.status;
+  }
+  throw new Error(`국가법령정보센터 응답 오류 ${status}`);
+}
+
+// 여러 요청 중 성공한 것만 모은다 (자료 한 건이 실패해도 나머지는 살린다).
+// 30초 시간 초과는 위로 넘겨 전체 요청을 멈추게 한다.
+async function settled<T>(promises: Promise<T>[], signal: AbortSignal): Promise<{ values: T[]; failed: number }> {
+  const results = await Promise.allSettled(promises);
+  if (signal.aborted) throw signal.reason;
+  const values = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+  for (const r of results) {
+    if (r.status === "rejected") {
+      console.error("[law-api] 일부 조회 실패:", r.reason instanceof Error ? r.reason.message : r.reason);
+    }
+  }
+  return { values, failed: results.length - values.length };
 }
 
 // 목록 응답에서 항목 배열을 꺼낸다 (결과가 1건이면 배열이 아닌 객체로 오는 경우 대비)
@@ -81,7 +100,7 @@ async function searchPrecedents(oc: string, word: string, signal: AbortSignal): 
     .sort((a, b) => Number(b.법원명 === "대법원") - Number(a.법원명 === "대법원"))
     .slice(0, MAX_RESULTS);
 
-  const items = await Promise.all(
+  const { values: items } = await settled(
     picked.map(async (p): Promise<LookupItem | null> => {
       const detail = (
         await getJson(`${BASE}/lawService.do?OC=${oc}&target=prec&type=JSON&ID=${p.판례일련번호}`, signal)
@@ -101,6 +120,7 @@ async function searchPrecedents(oc: string, word: string, signal: AbortSignal): 
         link: `https://www.law.go.kr/LSW/precInfoP.do?precSeq=${p.판례일련번호}`,
       };
     }),
+    signal,
   );
   return items.filter((i): i is LookupItem => i !== null);
 }
@@ -115,7 +135,7 @@ async function searchInterpretations(oc: string, word: string, signal: AbortSign
     .filter((e) => e.안건명?.includes("국유재산"))
     .slice(0, MAX_RESULTS);
 
-  const items = await Promise.all(
+  const { values: items } = await settled(
     picked.map(async (e): Promise<LookupItem | null> => {
       const detail = (
         await getJson(`${BASE}/lawService.do?OC=${oc}&target=expc&type=JSON&ID=${e.법령해석례일련번호}`, signal)
@@ -135,6 +155,7 @@ async function searchInterpretations(oc: string, word: string, signal: AbortSign
         link: `https://www.law.go.kr/LSW/expcInfoP.do?expcSeq=${e.법령해석례일련번호}`,
       };
     }),
+    signal,
   );
   return items.filter((i): i is LookupItem => i !== null);
 }
@@ -144,26 +165,31 @@ export type LookupResult =
   | { status: "skipped" } // 인증값이 없어 조회하지 않음
   | { status: "failed" }; // 조회 중 오류 (DESIGN.md 2장 "자료 조회 실패")
 
-// 핵심 낱말로 판례·법령해석례를 함께 조회해 최대 3건씩 돌려준다.
-export async function lookupLawCenter(terms: string[], signal: AbortSignal): Promise<LookupResult> {
+// 무엇을 조회할지: 판례, 법령해석례(유권해석)
+export type LookupTargets = { precedents: boolean; interpretations: boolean };
+
+// 핵심 낱말로 판례·법령해석례를 조회해 최대 3건씩 돌려준다.
+export async function lookupLawCenter(
+  terms: string[],
+  signal: AbortSignal,
+  targets: LookupTargets = { precedents: true, interpretations: true },
+): Promise<LookupResult> {
   const oc = getOC();
   if (!oc) return { status: "skipped" };
 
   const [word] = pickCoreWords(terms);
   if (!word) return { status: "ok", items: [] };
 
-  try {
-    const [precedents, interpretations] = await Promise.all([
-      searchPrecedents(oc, word, signal),
-      searchInterpretations(oc, word, signal),
-    ]);
-    return { status: "ok", items: [...precedents, ...interpretations] };
-  } catch (error) {
-    // 30초 시간 초과는 위로 넘겨 전체 요청을 멈추게 한다.
-    if (signal.aborted) throw error;
-    console.error("[law-api] 국가법령정보센터 조회 실패:", error instanceof Error ? error.message : error);
-    return { status: "failed" };
-  }
+  // 판례 조회와 해석례 조회는 서로 영향을 주지 않는다. 한쪽이 실패해도 다른 쪽 결과는 쓴다.
+  const searches: Promise<LookupItem[]>[] = [];
+  if (targets.precedents) searches.push(searchPrecedents(oc, word, signal));
+  if (targets.interpretations) searches.push(searchInterpretations(oc, word, signal));
+  if (searches.length === 0) return { status: "ok", items: [] };
+
+  const { values, failed } = await settled(searches, signal);
+  // 요청한 조회가 모두 실패했을 때만 "조회 실패"로 본다 (DESIGN.md 2장 "자료 조회 실패").
+  if (failed === searches.length) return { status: "failed" };
+  return { status: "ok", items: values.flat() };
 }
 
 // AI에 넘길 조회 자료 글

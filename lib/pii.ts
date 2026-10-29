@@ -90,3 +90,14 @@ export function findPersonalInfo(text: string): PiiMatch[] {
 export function hasPersonalInfo(text: string): boolean {
   return findPersonalInfo(text).length > 0;
 }
+
+// 글 속 개인정보를 "[개인정보 가림]"으로 바꾸고, 가린 개수를 함께 돌려준다 (답변 검사에 사용).
+export function maskPersonalInfo(text: string): { text: string; count: number } {
+  const found = findPersonalInfo(text);
+  let masked = text;
+  // 뒤에서부터 바꿔야 앞쪽 위치가 어긋나지 않는다.
+  for (const match of [...found].reverse()) {
+    masked = masked.slice(0, match.start) + "[개인정보 가림]" + masked.slice(match.end);
+  }
+  return { text: masked, count: found.length };
+}

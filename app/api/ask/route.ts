@@ -5,7 +5,7 @@
 // 이후 작업에서 이어 붙일 것:
 //   PLAN 17~18번  테스트 질문으로 성공 기준 확인
 import OpenAI from "openai";
-import { verifyCaseNumbers } from "@/lib/verify";
+import { maskAnswerPersonalInfo, verifyCaseNumbers } from "@/lib/verify";
 import { buildInstructions } from "@/lib/prompt";
 import { ANSWER_FORMAT, parseAnswer } from "@/lib/schema";
 import { findPersonalInfo } from "@/lib/pii";
@@ -92,13 +92,15 @@ export async function POST(request: Request) {
     }
     const found = searchMaterials(terms);
 
-    // PLAN 12번: 넣어 둔 자료에 맞는 조문이나 판례가 하나도 없으면 국가법령정보센터를 조회해 보완한다.
+    // PLAN 12번: 국가법령정보센터를 조회해 보완한다 (DESIGN.md 3장 "자료 찾는 방법" 4).
+    // - 법령해석례(유권해석): data 폴더에 넣어 둔 것이 없으므로 항상 조회한다 (PRD 6장 "공개 유권해석").
+    // - 판례: 넣어 둔 자료에 맞는 조문이나 판례가 하나도 없을 때만 조회한다.
     // 조회가 실패해도 오류를 띄우지 않고, 넣어 둔 자료만으로 답한 뒤 안내 문구를 붙인다.
-    let lookup: LookupResult | null = null;
-    if (found.lawsInsufficient || found.casesInsufficient) {
-      lookup = await lookupLawCenter(terms, deadline);
-    }
-    const lookupItems = lookup?.status === "ok" ? lookup.items : [];
+    const lookup: LookupResult = await lookupLawCenter(terms, deadline, {
+      precedents: found.lawsInsufficient || found.casesInsufficient,
+      interpretations: true,
+    });
+    const lookupItems = lookup.status === "ok" ? lookup.items : [];
 
     const materials = [formatMaterials(found), formatLookup(lookupItems)].filter(Boolean).join("\n\n");
 
@@ -130,9 +132,15 @@ export async function POST(request: Request) {
       console.error("[api/ask] 자료에 없는 사건번호를 걸러냄:", verified.removed.join(", "));
     }
 
+    // PRD 7장: 답변에도 개인정보를 넣지 않는다. 숫자형 개인정보가 있으면 가린다 (내용은 기록하지 않음).
+    const safe = maskAnswerPersonalInfo(verified.answer);
+    if (safe.masked > 0) {
+      console.error(`[api/ask] 답변 속 개인정보 ${safe.masked}건을 가림`);
+    }
+
     return Response.json({
-      answer: verified.answer,
-      notice: lookup?.status === "failed" ? LOOKUP_FAILED_NOTICE : null,
+      answer: safe.answer,
+      notice: lookup.status === "failed" ? LOOKUP_FAILED_NOTICE : null,
       // 어떤 자료를 찾아 AI에 넘겼는지 (PLAN 16번 작업과 확인용)
       sources: {
         terms: found.terms,
@@ -140,9 +148,10 @@ export async function POST(request: Request) {
         cases: found.cases.map((c) => c.id),
         lawsInsufficient: found.lawsInsufficient,
         casesInsufficient: found.casesInsufficient,
-        lookup: lookup?.status ?? "not-needed",
+        lookup: lookup.status,
         lookupItems: lookupItems.map((i) => `${i.kind} ${i.number}`),
         removedCaseNumbers: verified.removed,
+        maskedPersonalInfo: safe.masked,
       },
     });
   } catch (error) {

@@ -27,6 +27,11 @@ export type StructuredAnswer = {
   notice: string; // 범위 밖·근거 없음일 때만: 안내 문구
 };
 
+// 법령해석례(유권해석) 안건번호 모양인지 (예: 11-0503). 판례 사건번호와 이름표를 다르게 보여 주는 데 쓴다.
+export function isInterpretationNumber(number: string): boolean {
+  return /^\d{2}-\d{4}$/.test(number.trim());
+}
+
 // 앞의 대화로 AI에 다시 보낼 때 쓰는 글 버전 (화면이 열려 있는 동안의 대화 맥락용)
 export function answerToText(a: StructuredAnswer): string {
   if (a.type === "clarify") return a.clarifyQuestions.join("\n");

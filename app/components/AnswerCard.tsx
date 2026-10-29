@@ -1,7 +1,7 @@
 // 답변 카드 (PLAN 14번, DESIGN.md 2장 "답변 카드")
 // 결론 요약 → 상세 설명 → 근거 조문(시행일) → 관련 사례 → 참고용 문구 순서로 보여 준다.
 // 답변 종류(일반/되묻기/범위 밖/근거 없음)마다 보이는 칸이 다르다 (DESIGN.md 3장 표).
-import type { CaseRef, StructuredAnswer } from "@/lib/answer";
+import { isInterpretationNumber, type CaseRef, type StructuredAnswer } from "@/lib/answer";
 
 // PRD 5장: 모든 답변 끝에 붙는 문구. AI가 빠뜨리지 않도록 화면이 직접 붙인다.
 const DISCLAIMER = "참고용 정보이며, 최종 판단은 법무 부서에 확인하세요.";
@@ -48,20 +48,25 @@ export default function AnswerCard({
 
 // 사례 카드 하나 (PLAN 15번, DESIGN.md 2장 "사례 카드")
 // 사건번호·날짜·법원(기관)명을 따로 표시하고, 요지는 2줄을 넘으면 잘라서 보여 준다.
+// 유권해석(법령해석례)은 안건번호·회신일·회신기관으로 이름표를 바꿔 보여 준다.
 function CaseItem({ item }: { item: CaseRef }) {
+  const interpretation = isInterpretationNumber(item.caseNumber);
   return (
     <li className="rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-700">
+      {interpretation && (
+        <p className="mb-0.5 text-xs font-medium text-blue-700 dark:text-blue-400">유권해석(법령해석례)</p>
+      )}
       <dl className="flex flex-wrap gap-x-3 gap-y-0.5">
         <div className="flex gap-1">
-          <dt className="text-zinc-500 dark:text-zinc-400">사건번호</dt>
+          <dt className="text-zinc-500 dark:text-zinc-400">{interpretation ? "안건번호" : "사건번호"}</dt>
           <dd className="font-semibold">{item.caseNumber}</dd>
         </div>
         <div className="flex gap-1">
-          <dt className="text-zinc-500 dark:text-zinc-400">선고(재결)일</dt>
+          <dt className="text-zinc-500 dark:text-zinc-400">{interpretation ? "회신일" : "선고(재결)일"}</dt>
           <dd>{item.date.replace(/\.?$/, ".")}</dd>
         </div>
         <div className="flex gap-1">
-          <dt className="text-zinc-500 dark:text-zinc-400">법원·기관</dt>
+          <dt className="text-zinc-500 dark:text-zinc-400">{interpretation ? "회신기관" : "법원·기관"}</dt>
           <dd>{item.court}</dd>
         </div>
       </dl>

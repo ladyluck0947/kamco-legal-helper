@@ -4,6 +4,7 @@
 // - 결론·설명 글: 자료에 없는 사건번호는 "(확인되지 않은 사건번호)"로 바꾼다.
 // AI에게 "지어내지 말라"고 부탁하는 것(lib/prompt.ts)에 더해, 혹시 지어내도 화면에 나가지 않게 하는 마지막 안전장치다.
 import type { StructuredAnswer } from "./answer";
+import { maskPersonalInfo } from "./pii";
 
 const UNVERIFIED = "(확인되지 않은 사건번호)";
 
@@ -57,5 +58,28 @@ export function verifyCaseNumbers(answer: StructuredAnswer, allowedNumbers: stri
       notice: fix(answer.notice),
     },
     removed: [...removed],
+  };
+}
+
+// 답변 속 개인정보 가리기 (PRD 7장 "답변에도 개인정보를 넣지 않는다")
+// 질문은 보내기 전에 막지만, AI가 판례 내용 등을 옮기면서 숫자형 개인정보를 쓸 수 있어 답변도 한 번 더 검사한다.
+export function maskAnswerPersonalInfo(answer: StructuredAnswer): { answer: StructuredAnswer; masked: number } {
+  let masked = 0;
+  const fix = (text: string) => {
+    const result = maskPersonalInfo(text);
+    masked += result.count;
+    return result.text;
+  };
+
+  return {
+    answer: {
+      ...answer,
+      summary: answer.summary.map(fix),
+      detail: fix(answer.detail),
+      cases: answer.cases.map((c) => ({ ...c, gist: fix(c.gist) })),
+      clarifyQuestions: answer.clarifyQuestions.map(fix),
+      notice: fix(answer.notice),
+    },
+    masked,
   };
 }
