@@ -5,7 +5,7 @@
 // 이후 작업에서 이어 붙일 것:
 //   PLAN 17~18번  테스트 질문으로 성공 기준 확인
 import OpenAI from "openai";
-import { maskAnswerPersonalInfo, verifyCaseNumbers } from "@/lib/verify";
+import { maskAnswerPersonalInfo, verifyCaseNumbers, verifyLegalBasis } from "@/lib/verify";
 import { buildInstructions } from "@/lib/prompt";
 import { ANSWER_FORMAT, parseAnswer } from "@/lib/schema";
 import { findPersonalInfo } from "@/lib/pii";
@@ -192,8 +192,17 @@ export async function POST(request: Request) {
       console.error("[api/ask] 자료에 없는 사건번호를 걸러냄:", verified.removed.join(", "));
     }
 
+    // 근거 조문도 같은 방식으로 대조한다. 이번에 넘긴 조문(data 폴더 + 실시간 조회)에 없는 조문은 내보내지 않는다.
+    const checkedBasis = verifyLegalBasis(verified.answer, [
+      ...found.laws.map((l) => ({ law: l.law, article: l.article, effectiveDate: l.effectiveDate })),
+      ...lawArticles.map((a) => ({ law: a.law, article: a.article, effectiveDate: a.effectiveDate })),
+    ]);
+    if (checkedBasis.removed.length > 0) {
+      console.error("[api/ask] 자료에 없는 근거 조문을 걸러냄:", checkedBasis.removed.join(", "));
+    }
+
     // PRD 7장: 답변에도 개인정보를 넣지 않는다. 숫자형 개인정보가 있으면 가린다 (내용은 기록하지 않음).
-    const safe = maskAnswerPersonalInfo(verified.answer);
+    const safe = maskAnswerPersonalInfo(checkedBasis.answer);
     if (safe.masked > 0) {
       console.error(`[api/ask] 답변 속 개인정보 ${safe.masked}건을 가림`);
     }
@@ -225,6 +234,7 @@ export async function POST(request: Request) {
         lawCandidates: candidates.length, // 후보로 모은 조문 수
         lawArticles: lawArticles.map((a) => `${a.law} ${a.article}${a.via ? " (인용)" : ""}`), // AI가 고른 조문
         removedCaseNumbers: verified.removed,
+        removedLegalBasis: checkedBasis.removed,
         maskedPersonalInfo: safe.masked,
       },
     });

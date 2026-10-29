@@ -61,6 +61,47 @@ export function verifyCaseNumbers(answer: StructuredAnswer, allowedNumbers: stri
   };
 }
 
+// ---------- 근거 조문 확인 ----------
+// AI가 근거로 적은 조문(법령명 + 조 번호)이 이번에 넘긴 자료에 실제로 있는지 대조한다.
+// - 자료에 없는 조문은 근거 목록에서 뺀다. (지어낸 조문이 화면에 나가지 않게)
+// - 시행일이 자료와 다르게 적혔으면 자료의 시행일로 고친다.
+// - 일반 답변인데 근거가 하나도 남지 않으면, 근거 없는 답을 내보내지 않고 "근거 없음" 안내로 바꾼다.
+export type ProvidedArticle = { law: string; article: string; effectiveDate: string };
+
+const NO_BASIS_NOTICE =
+  "확인된 근거가 없습니다. 이번에 찾은 자료에서 질문에 맞는 조문을 확인하지 못했으니 법무 부서에 문의하세요.";
+
+const compact = (text: string) => text.replace(/\s+/g, "");
+// "제73조의3 제1항" → "제73조의3" (항·호는 떼고 조 번호까지만 비교한다)
+const articleKey = (article: string) => compact(article).match(/^제\d+조(?:의\d+)?/)?.[0] ?? "";
+const dateKey = (date: string) => (date.match(/\d+/g) ?? []).join("-");
+
+export function verifyLegalBasis(
+  answer: StructuredAnswer,
+  provided: ProvidedArticle[],
+): { answer: StructuredAnswer; removed: string[] } {
+  const removed: string[] = [];
+  const legalBasis = answer.legalBasis.flatMap((b) => {
+    const key = articleKey(b.article);
+    const hit = key && provided.find((p) => compact(p.law) === compact(b.law) && articleKey(p.article) === key);
+    if (!hit) {
+      removed.push(`${b.law} ${b.article}`);
+      return [];
+    }
+    const sameDate = dateKey(b.effectiveDate) === dateKey(hit.effectiveDate);
+    const fixed = hit.effectiveDate.trim().replace(/\.?$/, ".");
+    return [sameDate ? b : { ...b, effectiveDate: fixed }];
+  });
+
+  if (answer.type === "answer" && legalBasis.length === 0) {
+    return {
+      answer: { ...answer, type: "no_basis", summary: [], detail: "", legalBasis: [], cases: [], notice: NO_BASIS_NOTICE },
+      removed,
+    };
+  }
+  return { answer: { ...answer, legalBasis }, removed };
+}
+
 // 답변 속 개인정보 가리기 (PRD 7장 "답변에도 개인정보를 넣지 않는다")
 // 질문은 보내기 전에 막지만, AI가 판례 내용 등을 옮기면서 숫자형 개인정보를 쓸 수 있어 답변도 한 번 더 검사한다.
 export function maskAnswerPersonalInfo(answer: StructuredAnswer): { answer: StructuredAnswer; masked: number } {
