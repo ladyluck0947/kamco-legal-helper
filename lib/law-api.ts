@@ -12,6 +12,7 @@ const MAX_RESULTS = 3; // DESIGN.md: 결과 중 상위 3건을 추가
 const CANDIDATES = 20; // 해석례 목록에서 먼저 받아 볼 개수
 const PRECEDENT_LIST = 40; // 판례 본문 검색 목록에서 받아 볼 개수
 const PRECEDENT_DETAILS = 8; // 그중 본문을 열어 확인할 판례 수
+const EXTRA_PRECEDENT_DETAILS = 6; // 국유재산법 외 법령의 판례는 요청을 아끼려고 본문을 6건만 연다
 
 // 조회로 찾은 자료 한 건 (판례 또는 법령해석례)
 export type LookupItem = {
@@ -58,15 +59,40 @@ function clean(text: unknown): string {
     .trim();
 }
 
+// 국가법령정보센터에 동시에 보내는 요청 수를 제한한다.
+// 법령·판례를 폭넓게 조회하다 보면 요청이 수십 개가 되는데, 한꺼번에 보내면 일시 오류(404)가 늘어난다.
+const MAX_CONCURRENT = 8;
+let activeRequests = 0;
+const waitingForSlot: Array<() => void> = [];
+
+async function acquireSlot() {
+  if (activeRequests < MAX_CONCURRENT) {
+    activeRequests++;
+    return;
+  }
+  await new Promise<void>((resolve) => waitingForSlot.push(resolve));
+}
+
+function releaseSlot() {
+  const next = waitingForSlot.shift();
+  if (next) next(); // 기다리던 요청에 자리를 넘긴다
+  else activeRequests--;
+}
+
 // 국가법령정보센터는 가끔 일시적으로 404·5xx를 돌려주므로, 실패하면 1번 다시 시도한다.
 export async function getJson(url: string, signal: AbortSignal) {
-  let status = 0;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await fetch(url, { signal });
-    if (response.ok) return response.json();
-    status = response.status;
+  await acquireSlot();
+  try {
+    let status = 0;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await fetch(url, { signal });
+      if (response.ok) return await response.json();
+      status = response.status;
+    }
+    throw new Error(`국가법령정보센터 응답 오류 ${status}`);
+  } finally {
+    releaseSlot();
   }
-  throw new Error(`국가법령정보센터 응답 오류 ${status}`);
 }
 
 // 여러 요청 중 성공한 것만 모은다 (자료 한 건이 실패해도 나머지는 살린다).
@@ -93,23 +119,28 @@ type PrecListItem = { 판례일련번호: string; 사건명: string; 사건번�
 type ExpcListItem = { 법령해석례일련번호: string; 안건명: string; 안건번호: string; 회신일자: string; 회신기관명: string };
 
 // 판례는 제목에 "국유재산"이 드물어 제목 검색으로는 거의 찾지 못한다.
-// 그래서 "국유재산법 ○○"로 본문을 검색한 뒤, 본문을 열어 참조조문에 국유재산법이 있는 판례만 쓴다.
+// 그래서 "법령명 ○○"로 본문을 검색한 뒤, 본문을 열어 참조조문에 그 법령이 있는 판례만 쓴다.
+// 기본은 국유재산법이고, 민법 등 함께 보는 법령을 인용한 판례도 같은 방식으로 찾는다.
 async function searchPrecedents(
   oc: string,
+  lawName: string,
   word: string,
   signal: AbortSignal,
   exclude: Set<string>,
+  details: number,
+  limit: number,
 ): Promise<LookupItem[]> {
   const list = await getJson(
-    `${BASE}/lawSearch.do?OC=${oc}&target=prec&type=JSON&search=2&display=${PRECEDENT_LIST}&query=${encodeURIComponent(`국유재산법 ${word}`)}`,
+    `${BASE}/lawSearch.do?OC=${oc}&target=prec&type=JSON&search=2&display=${PRECEDENT_LIST}&query=${encodeURIComponent(`${lawName} ${word}`)}`,
     signal,
   );
-  // 대법원 데이터만 (국세청 판례는 본문을 JSON으로 주지 않는다), data 폴더에 이미 있는 판례는 빼고,
+  // 대법원 데이터만 (국세청 판례는 본문을 JSON으로 주지 않는다), 이미 가진 판례는 빼고,
   // 대법원 판결을 앞에 둔다.
   const picked = asArray<PrecListItem>(list?.PrecSearch?.prec)
     .filter((p) => p.데이터출처명 === "대법원" && !exclude.has(p.사건번호))
     .sort((a, b) => Number(b.법원명 === "대법원") - Number(a.법원명 === "대법원"))
-    .slice(0, PRECEDENT_DETAILS);
+    .slice(0, details);
+  const wanted = lawName.replace(/\s+/g, "");
 
   const { values: items } = await settled(
     picked.map(async (p): Promise<LookupItem | null> => {
@@ -118,8 +149,8 @@ async function searchPrecedents(
       )?.PrecService;
       const holdings = clean(detail?.판시사항);
       const summary = clean(detail?.판결요지);
-      // 국유재산법을 참조조문으로 인용하지 않은 판례, 판결요지가 비어 있는 판례는 근거로 쓰지 않는다.
-      if (!String(detail?.참조조문 ?? "").includes("국유재산법") || !summary) return null;
+      // 그 법령을 참조조문으로 인용하지 않은 판례, 판결요지가 비어 있는 판례는 근거로 쓰지 않는다.
+      if (!String(detail?.참조조문 ?? "").replace(/\s+/g, "").includes(wanted) || !summary) return null;
       return {
         id: `lookup-prec-${p.판례일련번호}`,
         kind: "판례",
@@ -133,7 +164,7 @@ async function searchPrecedents(
     }),
     signal,
   );
-  return items.filter((i): i is LookupItem => i !== null).slice(0, MAX_RESULTS);
+  return items.filter((i): i is LookupItem => i !== null).slice(0, limit);
 }
 
 async function searchInterpretations(oc: string, word: string, signal: AbortSignal): Promise<LookupItem[]> {
@@ -181,7 +212,12 @@ export type LookupTargets = {
   precedents: boolean;
   interpretations: boolean;
   excludeCaseNumbers?: string[]; // 이미 넣어 둔 판례 (중복 조회 방지)
+  // 국유재산법 외에 함께 보는 법령(민법 등)을 인용한 판례도 찾는다. word는 그 법령에서 찾을 핵심 낱말.
+  extraPrecedentLaws?: { law: string; word: string }[];
 };
+
+const EXTRA_PRECEDENT_LAWS = 2; // 국유재산법 외에 판례를 따로 찾아볼 법령 수
+const EXTRA_PRECEDENTS_PER_LAW = 2; // 그 법령마다 추가할 판례 수
 
 // 핵심 낱말로 판례·법령해석례를 조회해 최대 3건씩 돌려준다.
 export async function lookupLawCenter(
@@ -196,9 +232,16 @@ export async function lookupLawCenter(
   if (!word) return { status: "ok", items: [] };
 
   // 판례 조회와 해석례 조회는 서로 영향을 주지 않는다. 한쪽이 실패해도 다른 쪽 결과는 쓴다.
+  const exclude = new Set(targets.excludeCaseNumbers ?? []);
   const searches: Promise<LookupItem[]>[] = [];
   if (targets.precedents) {
-    searches.push(searchPrecedents(oc, word, signal, new Set(targets.excludeCaseNumbers ?? [])));
+    searches.push(searchPrecedents(oc, "국유재산법", word, signal, exclude, PRECEDENT_DETAILS, MAX_RESULTS));
+    for (const extra of (targets.extraPrecedentLaws ?? []).slice(0, EXTRA_PRECEDENT_LAWS)) {
+      if (!extra.word) continue;
+      searches.push(
+        searchPrecedents(oc, extra.law, extra.word, signal, exclude, EXTRA_PRECEDENT_DETAILS, EXTRA_PRECEDENTS_PER_LAW),
+      );
+    }
   }
   if (targets.interpretations) searches.push(searchInterpretations(oc, word, signal));
   if (searches.length === 0) return { status: "ok", items: [] };
@@ -206,7 +249,11 @@ export async function lookupLawCenter(
   const { values, failed } = await settled(searches, signal);
   // 요청한 조회가 모두 실패했을 때만 "조회 실패"로 본다 (DESIGN.md 2장 "자료 조회 실패").
   if (failed === searches.length) return { status: "failed" };
-  return { status: "ok", items: values.flat() };
+
+  // 같은 판례가 여러 조회에서 나오면 한 번만 쓴다.
+  const seen = new Set<string>();
+  const items = values.flat().filter((i) => !seen.has(i.id) && seen.add(i.id));
+  return { status: "ok", items };
 }
 
 // AI에 넘길 조회 자료 글

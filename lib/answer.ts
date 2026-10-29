@@ -17,8 +17,16 @@ export type CaseRef = {
   partiallyPublic: boolean; // 일부만 공개된 자료인지
 };
 
+// 이번 답변을 만들면서 AI가 받아 본 자료의 요약 (서버가 채워서 화면에 "검토한 자료"로 보여 준다)
+export type ReviewedSummary = {
+  laws: string[]; // 검토한 법령 이름
+  articleCount: number; // 법령 조문 수
+  caseCount: number; // 판례·유권해석 수
+};
+
 export type StructuredAnswer = {
   type: AnswerType;
+  reviewed?: ReviewedSummary;
   summary: string[]; // 결론 요약 (3문장 이내)
   detail: string; // 상세 설명
   legalBasis: LegalBasis[]; // 근거 조문 (일반 답변은 1개 이상)

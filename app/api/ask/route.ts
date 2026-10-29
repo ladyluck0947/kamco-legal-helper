@@ -11,10 +11,9 @@ import { ANSWER_FORMAT, parseAnswer } from "@/lib/schema";
 import { findPersonalInfo } from "@/lib/pii";
 import { ERROR_MESSAGES, SERVER_TIMEOUT_MS, type ErrorCode } from "@/lib/errors";
 import { AI_MODEL } from "@/lib/ai";
-import { formatMaterials, makeSearchTerms, searchMaterials } from "@/lib/search";
+import { formatMaterials, makeSearchTerms, searchMaterials, selectArticles } from "@/lib/search";
 import { formatLookup, lookupLawCenter, type LookupResult } from "@/lib/law-api";
 import {
-  articleKey,
   formatLawArticles,
   lookupRelatedLaws,
   type LawLookupResult,
@@ -23,8 +22,12 @@ import {
 
 // 국가법령정보센터 조회가 실패했을 때 답변 아래에 붙일 안내 (DESIGN.md 2장 "자료 조회 실패")
 const LOOKUP_FAILED_NOTICE = "국가법령정보센터 조회에 실패해 일부 자료만 참고했어요.";
-// 국가법령정보센터 조회에 쓸 수 있는 최대 시간 (평소 0.2~1초)
-const LOOKUP_TIMEOUT_MS = 5_000;
+// 국가법령정보센터 조회에 쓸 수 있는 최대 시간. 법령·시행령·인용 조문·판례를 폭넓게 조회하므로 평소 1~3초가 걸린다.
+const LOOKUP_TIMEOUT_MS = 8_000;
+// 후보 조문이 이 개수 이하면 AI가 다시 고르게 하지 않고 모두 쓴다.
+const SELECT_ABOVE = 6;
+// 후보 조문을 AI가 고르는 데 실패했을 때 후보의 앞쪽에서 그대로 쓸 개수
+const SELECT_FALLBACK = 12;
 
 // 한 번에 받을 대화 양의 상한 (너무 긴 요청으로 비용이 커지는 것을 막는다)
 const MAX_MESSAGES = 20;
@@ -122,25 +125,43 @@ export async function POST(request: Request) {
         return { status: "failed" };
       }
     };
+    // 국유재산법 외에 함께 보는 법령(민법 등)을 인용한 판례도 찾는다. 시행령·시행규칙은 판례에 따로 인용되지 않으므로 뺀다.
+    const extraPrecedentLaws = relatedLaws
+      .filter((l) => !/(시행령|시행규칙)$/.test(l.name) && !/^국유재산법$/.test(l.name.replace(/\s+/g, "")))
+      .map((l) => ({ law: l.name, word: l.keywords[0] ?? "" }));
     const [lookup, lawLookup]: [LookupResult, LawLookupResult] = await Promise.all([
       guarded(() =>
         lookupLawCenter(terms, lookupSignal, {
           precedents: true,
           interpretations: true,
           excludeCaseNumbers: found.cases.map((c) => c.caseNumber),
+          extraPrecedentLaws,
         }),
       ),
-      // 이미 data 폴더에서 골라 AI에 넘기는 조문은 다시 가져오지 않는다.
+      // 이미 data 폴더에서 골라 AI에 넘기는 조문은 다시 가져오지 않고, 그 조문 속 인용은 따라간다.
       guarded(() =>
         lookupRelatedLaws(
           relatedLaws,
           lookupSignal,
-          new Set(found.laws.map((l) => articleKey(l.law, l.article))),
+          found.laws.map((l) => ({ law: l.law, article: l.article, text: l.content })),
         ),
       ),
     ]);
     const lookupItems = lookup.status === "ok" ? lookup.items : [];
-    const lawArticles = lawLookup.status === "ok" ? lawLookup.articles : [];
+
+    // 법령 조문은 후보를 넓게 모은 것이므로, 질문에 정말 필요한 조문만 AI가 고른다.
+    // 고르기에 실패하면(시간 초과 제외) 후보의 앞쪽(법령별로 점수가 높은 순)을 그대로 쓴다.
+    const candidates = lawLookup.status === "ok" ? lawLookup.articles : [];
+    let lawArticles = candidates;
+    if (candidates.length > SELECT_ABOVE) {
+      try {
+        lawArticles = (await selectArticles(client, messages, candidates, deadline)) ?? candidates.slice(0, SELECT_FALLBACK);
+      } catch (error) {
+        if (deadline.aborted) throw error;
+        console.error("[api/ask] 후보 조문 고르기 실패, 후보 앞쪽을 그대로 사용:", error instanceof Error ? error.message : error);
+        lawArticles = candidates.slice(0, SELECT_FALLBACK);
+      }
+    }
 
     const materials = [formatMaterials(found), formatLookup(lookupItems), formatLawArticles(lawArticles)]
       .filter(Boolean)
@@ -180,8 +201,15 @@ export async function POST(request: Request) {
       console.error(`[api/ask] 답변 속 개인정보 ${safe.masked}건을 가림`);
     }
 
+    // 이번 답변을 만들면서 AI가 받아 본 자료의 요약. 화면에 "검토한 자료"로 보여 준다.
+    const reviewed = {
+      laws: [...new Set([...found.laws.map((l) => l.law), ...lawArticles.map((a) => a.law)])],
+      articleCount: found.laws.length + lawArticles.length,
+      caseCount: found.cases.length + lookupItems.length,
+    };
+
     return Response.json({
-      answer: safe.answer,
+      answer: { ...safe.answer, reviewed },
       notice: lookup.status === "failed" || lawLookup.status === "failed" ? LOOKUP_FAILED_NOTICE : null,
       // 어떤 자료를 찾아 AI에 넘겼는지 (PLAN 16번 작업과 확인용)
       sources: {
@@ -197,7 +225,8 @@ export async function POST(request: Request) {
         lawLookup: lawLookup.status,
         lawLookupLaws: lawLookup.status === "ok" ? lawLookup.laws : [],
         lawLookupNotFound: lawLookup.status === "ok" ? lawLookup.notFound : [],
-        lawArticles: lawArticles.map((a) => `${a.law} ${a.article}`),
+        lawCandidates: candidates.length, // 후보로 모은 조문 수
+        lawArticles: lawArticles.map((a) => `${a.law} ${a.article}${a.via ? " (인용)" : ""}`), // AI가 고른 조문
         removedCaseNumbers: verified.removed,
         maskedPersonalInfo: safe.masked,
       },

@@ -1,7 +1,12 @@
 // 답변 카드 (PLAN 14번, DESIGN.md 2장 "답변 카드")
 // 결론 요약 → 상세 설명 → 근거 조문(시행일) → 관련 사례 → 참고용 문구 순서로 보여 준다.
 // 답변 종류(일반/되묻기/범위 밖/근거 없음)마다 보이는 칸이 다르다 (DESIGN.md 3장 표).
-import { isInterpretationNumber, type CaseRef, type StructuredAnswer } from "@/lib/answer";
+import {
+  isInterpretationNumber,
+  type CaseRef,
+  type ReviewedSummary,
+  type StructuredAnswer,
+} from "@/lib/answer";
 
 // PRD 5장: 모든 답변 끝에 붙는 문구. AI가 빠뜨리지 않도록 화면이 직접 붙인다.
 const DISCLAIMER = "참고용 정보이며, 최종 판단은 법무 부서에 확인하세요.";
@@ -30,6 +35,11 @@ export default function AnswerCard({
 
       {(answer.type === "out_of_scope" || answer.type === "no_basis") && (
         <p className="whitespace-pre-wrap text-base">{answer.notice}</p>
+      )}
+
+      {/* 종합 검토: 이번 답변을 만들면서 어떤 자료를 검토했는지 */}
+      {(answer.type === "answer" || answer.type === "no_basis") && answer.reviewed && (
+        <ReviewedLine reviewed={answer.reviewed} />
       )}
 
       {/* 예: 국가법령정보센터 조회 실패 안내 (DESIGN.md 2장) */}
@@ -80,6 +90,17 @@ function CaseItem({ item }: { item: CaseRef }) {
         </p>
       )}
     </li>
+  );
+}
+
+// "이번에 검토한 자료" 한 줄: 법령 이름과 조문 수, 판례·유권해석 수 (종합 검토를 눈으로 확인할 수 있게)
+function ReviewedLine({ reviewed }: { reviewed: ReviewedSummary }) {
+  if (reviewed.laws.length === 0 && reviewed.caseCount === 0) return null;
+  return (
+    <p className="mt-3 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+      이번에 검토한 자료: 법령 {reviewed.laws.length}개({reviewed.laws.join(", ")}) 조문 {reviewed.articleCount}개
+      · 판례·유권해석 {reviewed.caseCount}건
+    </p>
   );
 }
 
