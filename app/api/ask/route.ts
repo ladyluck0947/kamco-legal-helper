@@ -10,7 +10,7 @@ import { buildInstructions } from "@/lib/prompt";
 import { ANSWER_FORMAT, parseAnswer } from "@/lib/schema";
 import { findPersonalInfo } from "@/lib/pii";
 import { ERROR_MESSAGES, MAX_MESSAGES, SERVER_TIMEOUT_MS, type ErrorCode } from "@/lib/errors";
-import { AI_MODEL } from "@/lib/ai";
+import { askAI } from "@/lib/ai";
 import { formatMaterials, makeSearchTerms, searchMaterials, selectArticles } from "@/lib/search";
 import { formatLookup, lookupLawCenter, type LookupResult } from "@/lib/law-api";
 import {
@@ -168,17 +168,15 @@ export async function POST(request: Request) {
     // 형식이 틀리면 1번 다시 요청하고, 그래도 틀리면 "답변 형식 오류"로 알린다 (DESIGN.md 2장).
     let answer = null;
     for (let attempt = 0; attempt < 2 && !answer; attempt++) {
-      const response = await client.responses.create(
+      const response = await askAI(
+        client,
         {
-          model: AI_MODEL,
-          // PRD 7장: 질문·답변을 OpenAI 쪽에도 저장하지 않는다. (저장 기본값을 끈다)
-          store: false,
           // PLAN 13번: PRD 5장의 AI 규칙 + 찾은 참고 자료
           instructions: buildInstructions(materials),
           input: messages.map((m) => ({ role: m.role, content: m.text })),
           text: { format: ANSWER_FORMAT },
         },
-        { signal: deadline },
+        deadline,
       );
       answer = parseAnswer(response.output_text);
     }
