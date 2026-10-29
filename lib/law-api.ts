@@ -1,5 +1,6 @@
 // 국가법령정보센터 조회 (PLAN 12번, DESIGN.md 3장 "자료 찾는 방법" 4)
-// 넣어 둔 자료(data 폴더)가 부족할 때, 국가법령정보센터 Open API로 판례·법령해석례(유권해석)를 찾아 보완한다.
+// 질문마다 국가법령정보센터 Open API로 판례·법령해석례(유권해석)를 실시간으로 찾아, 넣어 둔 자료(data 폴더)를 보완한다.
+// 새로 공개되는 판례·해석례도 따로 저장하지 않고 바로 반영된다 (PRD 6장 "자료 확보 방식").
 // API 안내: https://open.law.go.kr (판례 target=prec, 법령해석례 target=expc)
 //
 // 인증값(OC)은 .env의 LAW_API_OC에서 읽는다.
@@ -8,7 +9,9 @@
 
 const BASE = "https://www.law.go.kr/DRF";
 const MAX_RESULTS = 3; // DESIGN.md: 결과 중 상위 3건을 추가
-const CANDIDATES = 20; // 목록에서 먼저 받아 볼 개수
+const CANDIDATES = 20; // 해석례 목록에서 먼저 받아 볼 개수
+const PRECEDENT_LIST = 40; // 판례 본문 검색 목록에서 받아 볼 개수
+const PRECEDENT_DETAILS = 8; // 그중 본문을 열어 확인할 판례 수
 
 // 조회로 찾은 자료 한 건 (판례 또는 법령해석례)
 export type LookupItem = {
@@ -86,19 +89,27 @@ function asArray<T>(value: T | T[] | undefined): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
-type PrecListItem = { 판례일련번호: string; 사건명: string; 사건번호: string; 선고일자: string; 법원명: string };
+type PrecListItem = { 판례일련번호: string; 사건명: string; 사건번호: string; 선고일자: string; 법원명: string; 데이터출처명: string };
 type ExpcListItem = { 법령해석례일련번호: string; 안건명: string; 안건번호: string; 회신일자: string; 회신기관명: string };
 
-async function searchPrecedents(oc: string, word: string, signal: AbortSignal): Promise<LookupItem[]> {
+// 판례는 제목에 "국유재산"이 드물어 제목 검색으로는 거의 찾지 못한다.
+// 그래서 "국유재산법 ○○"로 본문을 검색한 뒤, 본문을 열어 참조조문에 국유재산법이 있는 판례만 쓴다.
+async function searchPrecedents(
+  oc: string,
+  word: string,
+  signal: AbortSignal,
+  exclude: Set<string>,
+): Promise<LookupItem[]> {
   const list = await getJson(
-    `${BASE}/lawSearch.do?OC=${oc}&target=prec&type=JSON&search=1&display=${CANDIDATES}&query=${encodeURIComponent(word)}`,
+    `${BASE}/lawSearch.do?OC=${oc}&target=prec&type=JSON&search=2&display=${PRECEDENT_LIST}&query=${encodeURIComponent(`국유재산법 ${word}`)}`,
     signal,
   );
-  // 사건명에 "국유재산"이 들어간 것만, 대법원 판례를 앞에 둔다.
+  // 대법원 데이터만 (국세청 판례는 본문을 JSON으로 주지 않는다), data 폴더에 이미 있는 판례는 빼고,
+  // 대법원 판결을 앞에 둔다.
   const picked = asArray<PrecListItem>(list?.PrecSearch?.prec)
-    .filter((p) => p.사건명?.includes("국유재산"))
+    .filter((p) => p.데이터출처명 === "대법원" && !exclude.has(p.사건번호))
     .sort((a, b) => Number(b.법원명 === "대법원") - Number(a.법원명 === "대법원"))
-    .slice(0, MAX_RESULTS);
+    .slice(0, PRECEDENT_DETAILS);
 
   const { values: items } = await settled(
     picked.map(async (p): Promise<LookupItem | null> => {
@@ -107,8 +118,8 @@ async function searchPrecedents(oc: string, word: string, signal: AbortSignal): 
       )?.PrecService;
       const holdings = clean(detail?.판시사항);
       const summary = clean(detail?.판결요지);
-      // 판시사항·판결요지가 모두 비어 있는 판례(주로 하급심)는 근거로 쓸 수 없으므로 뺀다.
-      if (!holdings && !summary) return null;
+      // 국유재산법을 참조조문으로 인용하지 않은 판례, 판결요지가 비어 있는 판례는 근거로 쓰지 않는다.
+      if (!String(detail?.참조조문 ?? "").includes("국유재산법") || !summary) return null;
       return {
         id: `lookup-prec-${p.판례일련번호}`,
         kind: "판례",
@@ -122,7 +133,7 @@ async function searchPrecedents(oc: string, word: string, signal: AbortSignal): 
     }),
     signal,
   );
-  return items.filter((i): i is LookupItem => i !== null);
+  return items.filter((i): i is LookupItem => i !== null).slice(0, MAX_RESULTS);
 }
 
 async function searchInterpretations(oc: string, word: string, signal: AbortSignal): Promise<LookupItem[]> {
@@ -166,7 +177,11 @@ export type LookupResult =
   | { status: "failed" }; // 조회 중 오류 (DESIGN.md 2장 "자료 조회 실패")
 
 // 무엇을 조회할지: 판례, 법령해석례(유권해석)
-export type LookupTargets = { precedents: boolean; interpretations: boolean };
+export type LookupTargets = {
+  precedents: boolean;
+  interpretations: boolean;
+  excludeCaseNumbers?: string[]; // 이미 넣어 둔 판례 (중복 조회 방지)
+};
 
 // 핵심 낱말로 판례·법령해석례를 조회해 최대 3건씩 돌려준다.
 export async function lookupLawCenter(
@@ -182,7 +197,9 @@ export async function lookupLawCenter(
 
   // 판례 조회와 해석례 조회는 서로 영향을 주지 않는다. 한쪽이 실패해도 다른 쪽 결과는 쓴다.
   const searches: Promise<LookupItem[]>[] = [];
-  if (targets.precedents) searches.push(searchPrecedents(oc, word, signal));
+  if (targets.precedents) {
+    searches.push(searchPrecedents(oc, word, signal, new Set(targets.excludeCaseNumbers ?? [])));
+  }
   if (targets.interpretations) searches.push(searchInterpretations(oc, word, signal));
   if (searches.length === 0) return { status: "ok", items: [] };
 

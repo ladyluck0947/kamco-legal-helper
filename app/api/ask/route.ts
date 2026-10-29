@@ -95,8 +95,8 @@ export async function POST(request: Request) {
     const found = searchMaterials(terms);
 
     // PLAN 12번: 국가법령정보센터를 조회해 보완한다 (DESIGN.md 3장 "자료 찾는 방법" 4).
-    // - 법령해석례(유권해석): data 폴더에 넣어 둔 것이 없으므로 항상 조회한다 (PRD 6장 "공개 유권해석").
-    // - 판례: 넣어 둔 자료에 맞는 조문이나 판례가 하나도 없을 때만 조회한다.
+    // 질문마다 항상 판례·법령해석례(유권해석)를 실시간 조회한다 (PRD 6장 "자료 확보 방식").
+    // 새로 공개된 판례·해석례도 바로 반영되며, 넣어 둔 판례와 같은 사건번호는 다시 가져오지 않는다.
     // 조회가 실패해도 오류를 띄우지 않고, 넣어 둔 자료만으로 답한 뒤 안내 문구를 붙인다.
     // 조회는 최대 LOOKUP_TIMEOUT_MS까지만 기다린다. 국가법령정보센터가 느려도 30초 안에 답을 만들 시간을 남기기 위해서다.
     // 이 시간을 넘기면 조회 실패로 보고, 넣어 둔 자료만으로 답한다.
@@ -105,7 +105,7 @@ export async function POST(request: Request) {
       lookup = await lookupLawCenter(
         terms,
         AbortSignal.any([deadline, AbortSignal.timeout(LOOKUP_TIMEOUT_MS)]),
-        { precedents: found.lawsInsufficient || found.casesInsufficient, interpretations: true },
+        { precedents: true, interpretations: true, excludeCaseNumbers: found.cases.map((c) => c.caseNumber) },
       );
     } catch (error) {
       if (deadline.aborted) throw error;
