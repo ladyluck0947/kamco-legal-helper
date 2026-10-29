@@ -16,6 +16,8 @@ import { formatLookup, lookupLawCenter, type LookupResult } from "@/lib/law-api"
 
 // 국가법령정보센터 조회가 실패했을 때 답변 아래에 붙일 안내 (DESIGN.md 2장 "자료 조회 실패")
 const LOOKUP_FAILED_NOTICE = "국가법령정보센터 조회에 실패해 일부 자료만 참고했어요.";
+// 국가법령정보센터 조회에 쓸 수 있는 최대 시간 (평소 0.2~1초)
+const LOOKUP_TIMEOUT_MS = 5_000;
 
 // 한 번에 받을 대화 양의 상한 (너무 긴 요청으로 비용이 커지는 것을 막는다)
 const MAX_MESSAGES = 20;
@@ -96,10 +98,20 @@ export async function POST(request: Request) {
     // - 법령해석례(유권해석): data 폴더에 넣어 둔 것이 없으므로 항상 조회한다 (PRD 6장 "공개 유권해석").
     // - 판례: 넣어 둔 자료에 맞는 조문이나 판례가 하나도 없을 때만 조회한다.
     // 조회가 실패해도 오류를 띄우지 않고, 넣어 둔 자료만으로 답한 뒤 안내 문구를 붙인다.
-    const lookup: LookupResult = await lookupLawCenter(terms, deadline, {
-      precedents: found.lawsInsufficient || found.casesInsufficient,
-      interpretations: true,
-    });
+    // 조회는 최대 LOOKUP_TIMEOUT_MS까지만 기다린다. 국가법령정보센터가 느려도 30초 안에 답을 만들 시간을 남기기 위해서다.
+    // 이 시간을 넘기면 조회 실패로 보고, 넣어 둔 자료만으로 답한다.
+    let lookup: LookupResult;
+    try {
+      lookup = await lookupLawCenter(
+        terms,
+        AbortSignal.any([deadline, AbortSignal.timeout(LOOKUP_TIMEOUT_MS)]),
+        { precedents: found.lawsInsufficient || found.casesInsufficient, interpretations: true },
+      );
+    } catch (error) {
+      if (deadline.aborted) throw error;
+      console.error(`[api/ask] 국가법령정보센터 조회가 ${LOOKUP_TIMEOUT_MS / 1000}초를 넘겨 건너뜀`);
+      lookup = { status: "failed" };
+    }
     const lookupItems = lookup.status === "ok" ? lookup.items : [];
 
     const materials = [formatMaterials(found), formatLookup(lookupItems)].filter(Boolean).join("\n\n");
