@@ -1,0 +1,7 @@
+# Vercel CLI로 이 폴더를 배포할 때 올라가면 안 되는 파일 (.gitignore는 git에만 적용된다)
+# 비밀 값은 올리지 않고 Vercel 환경변수 화면에 OPENAI_API_KEY, LAW_API_OC만 따로 넣는다.
+.env
+.env.*
+.claude
+.bkit
+trash-can

@@ -31,6 +31,10 @@ const SELECT_FALLBACK = 12;
 
 // 한 번에 받을 대화 양의 상한 (너무 긴 요청으로 비용이 커지는 것을 막는다)
 const MAX_TEXT_LENGTH = 2000;
+// 대화 전체 글자 수 상한. 메시지마다 상한이 있어도 20개를 가득 채우면 AI에 넘기는 양이 너무 커진다.
+const MAX_TOTAL_LENGTH = 20_000;
+// 서버가 이 시간(초)을 넘겨 일하지 않도록 Vercel에 알린다. 서버 30초 제한(SERVER_TIMEOUT_MS)보다 조금 길게 잡았다.
+export const maxDuration = 40;
 
 type IncomingMessage = { role: "user" | "assistant"; text: string };
 
@@ -54,6 +58,9 @@ function validateMessages(value: unknown): IncomingMessage[] | string {
       item.text.length <= MAX_TEXT_LENGTH;
     if (!ok) return "대화 형식이 올바르지 않아요.";
   }
+
+  const total = value.reduce((sum: number, item: IncomingMessage) => sum + item.text.length, 0);
+  if (total > MAX_TOTAL_LENGTH) return "대화가 너무 길어요. '새 대화'를 눌러 다시 질문해 주세요.";
 
   if (value[value.length - 1].role !== "user") return "마지막 대화는 질문이어야 해요.";
   return value as IncomingMessage[];
@@ -171,6 +178,7 @@ export async function POST(request: Request) {
       const response = await askAI(
         client,
         {
+          max_output_tokens: 8000, // 긴 답변도 담되, 끝없이 길어지는 것은 막는다
           // PLAN 13번: PRD 5장의 AI 규칙 + 찾은 참고 자료
           instructions: buildInstructions(materials),
           input: messages.map((m) => ({ role: m.role, content: m.text })),

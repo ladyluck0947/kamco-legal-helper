@@ -36,6 +36,9 @@ type AskResult =
   | { ok: true; answer: StructuredAnswer; notice: string | null }
   | { ok: false; code: ErrorCode; message: string };
 
+// 서버로 다시 보낼 때 챗봇 답변 한 건의 최대 글자 수 (서버의 메시지당 상한 2000자보다 작게)
+const MAX_ASSISTANT_TEXT = 1500;
+
 // 서버 API에 대화를 보내고 답을 받는다 (DESIGN.md 3장 ②).
 async function ask(messages: Message[]): Promise<AskResult> {
   try {
@@ -43,7 +46,11 @@ async function ask(messages: Message[]): Promise<AskResult> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        messages: messages.map(({ role, text }) => ({ role, text })),
+        // 이전 챗봇 답변은 길면 앞부분만 보낸다. 서버의 글자 수 상한에 걸려 다음 질문이 막히는 것을 막고, 비용도 줄인다.
+        messages: messages.map(({ role, text }) => ({
+          role,
+          text: role === "assistant" ? text.slice(0, MAX_ASSISTANT_TEXT) : text,
+        })),
       }),
       // 서버의 30초 제한에 여유 5초를 더해 기다린다 (DESIGN.md 3장 "30초 시간 제한의 기준").
       signal: AbortSignal.timeout(CLIENT_TIMEOUT_MS),

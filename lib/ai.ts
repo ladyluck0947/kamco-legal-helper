@@ -8,9 +8,12 @@ export const AI_MODEL = "gpt-5.4-mini";
 // 이 앱의 모든 AI 요청은 이 함수 하나로 보낸다.
 // 모델과 "저장 안 함(store: false)"을 여기서 고정해, 요청을 새로 만들 때 빠뜨리는 일이 없게 한다.
 // PRD 7장: 질문·답변을 OpenAI 쪽에도 저장하지 않는다.
+// max_output_tokens는 꼭 정해서 넘긴다. 상한이 없으면 요청 한 번에 답이 끝없이 길어져 요금이 커질 수 있다.
 export function askAI(
   client: OpenAI,
-  params: Omit<ResponseCreateParamsNonStreaming, "model" | "store">,
+  params: Omit<ResponseCreateParamsNonStreaming, "model" | "store" | "max_output_tokens"> & {
+    max_output_tokens: number;
+  },
   signal: AbortSignal,
 ) {
   return client.responses.create({ ...params, model: AI_MODEL, store: false }, { signal });
